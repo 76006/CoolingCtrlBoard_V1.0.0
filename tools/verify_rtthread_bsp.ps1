@@ -60,4 +60,13 @@ Assert-Contains (Join-Path $bspRoot 'board\CubeMX_Config\Src\stm32f3xx_hal_msp.c
 Assert-Contains (Join-Path $bspRoot 'board\CubeMX_Config\Src\stm32f3xx_hal_msp.c') 'GPIO_PIN_7'
 Assert-Contains (Join-Path $bspRoot 'board\CubeMX_Config\Src\stm32f3xx_hal_msp.c') 'GPIO_AF7_USART1'
 
+$adcDriver = Join-Path $bspRoot '..\libraries\HAL_Drivers\drivers\drv_adc.c'
+Assert-Contains (Join-Path $bspRoot 'rtconfig.h') 'RT_USING_ADC'
+Assert-Contains (Join-Path $bspRoot 'rtconfig.h') 'BSP_USING_ADC1'
+Assert-Contains (Join-Path $bspRoot 'board\board.h') 'BSP_ADC_SAMPLING_TIME.*ADC_SAMPLETIME_181CYCLES_5'
+Assert-Contains (Join-Path $bspRoot 'board\CubeMX_Config\Src\stm32f3xx_hal_msp.c') 'GPIO_PIN_0.*GPIO_PIN_1.*GPIO_PIN_2'
+Assert-Contains (Join-Path $bspRoot 'board\CubeMX_Config\Src\stm32f3xx_hal_msp.c') 'GPIO_MODE_ANALOG'
+Assert-Contains $adcDriver 'BSP_ADC_SAMPLING_TIME'
+Assert-Contains $adcDriver 'HAL_ADCEx_Calibration_Start.*ADC_SINGLE_ENDED'
+
 Write-Output 'BSP static checks passed.'

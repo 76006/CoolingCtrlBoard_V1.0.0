@@ -56,6 +56,16 @@ menu "On-chip Peripheral Drivers"
 
         endif
 
+    menuconfig BSP_USING_ADC
+        bool "Enable ADC"
+        select RT_USING_ADC
+        default y
+        if BSP_USING_ADC
+            config BSP_USING_ADC1
+                bool "Enable ADC1 (PA0/PA1/PA2)"
+                default y
+        endif
+
 endmenu
 
 menu "Board extended module Drivers"

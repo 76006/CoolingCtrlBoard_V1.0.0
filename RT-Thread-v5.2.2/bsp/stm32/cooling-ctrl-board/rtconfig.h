@@ -148,6 +148,7 @@
 #define RT_SERIAL_USING_DMA
 #define RT_SERIAL_RB_BUFSZ 64
 #define RT_USING_PIN
+#define RT_USING_ADC
 /* end of Device Drivers */
 
 /* C/C++ and POSIX layer */
@@ -415,6 +416,8 @@
 #define BSP_USING_UART
 #define BSP_STM32_UART_V1_TX_TIMEOUT 2000
 #define BSP_USING_UART1
+#define BSP_USING_ADC
+#define BSP_USING_ADC1
 /* end of On-chip Peripheral Drivers */
 
 /* Board extended module Drivers */

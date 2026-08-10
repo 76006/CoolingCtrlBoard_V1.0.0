@@ -1,0 +1,21 @@
+diff --git a/bsp/stm32/libraries/HAL_Drivers/drivers/drv_adc.c b/bsp/stm32/libraries/HAL_Drivers/drivers/drv_adc.c
+--- a/bsp/stm32/libraries/HAL_Drivers/drivers/drv_adc.c
++++ b/bsp/stm32/libraries/HAL_Drivers/drivers/drv_adc.c
+@@
+-#if defined(SOC_SERIES_STM32F0)
++#if defined(BSP_ADC_SAMPLING_TIME)
++        ADC_ChanConf.SamplingTime = BSP_ADC_SAMPLING_TIME;
++#elif defined(SOC_SERIES_STM32F0)
+         ADC_ChanConf.SamplingTime = ADC_SAMPLETIME_71CYCLES_5;
+@@
+         else
+         {
++#if defined(SOC_SERIES_STM32F3)
++            if (HAL_ADCEx_Calibration_Start(&stm32_adc_obj[i].ADC_Handler, ADC_SINGLE_ENDED) != HAL_OK)
++            {
++                LOG_E("%s calibration failed", name_buf);
++                result = -RT_ERROR;
++                continue;
++            }
++#endif
+             /* register ADC device */

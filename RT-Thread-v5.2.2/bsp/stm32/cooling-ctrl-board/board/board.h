@@ -27,6 +27,29 @@ extern "C" {
 #define BOARD_HEATER_POWER_PIN       GET_PIN(B, 0)
 #define BOARD_LIMIT_SWITCH_PIN       GET_PIN(B, 15)
 
+#define BSP_ADC_SAMPLING_TIME        ADC_SAMPLETIME_181CYCLES_5
+
+#define ADC1_CONFIG                                                     \
+    {                                                                   \
+        .Instance = ADC1,                                               \
+        .Init =                                                         \
+        {                                                               \
+            .ClockPrescaler = ADC_CLOCK_ASYNC_DIV1,                     \
+            .Resolution = ADC_RESOLUTION_12B,                           \
+            .DataAlign = ADC_DATAALIGN_RIGHT,                           \
+            .ScanConvMode = ADC_SCAN_DISABLE,                           \
+            .EOCSelection = ADC_EOC_SINGLE_CONV,                        \
+            .LowPowerAutoWait = DISABLE,                                \
+            .ContinuousConvMode = DISABLE,                              \
+            .NbrOfConversion = 1,                                       \
+            .DiscontinuousConvMode = DISABLE,                           \
+            .ExternalTrigConv = ADC_SOFTWARE_START,                     \
+            .ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE,      \
+            .DMAContinuousRequests = DISABLE,                            \
+            .Overrun = ADC_OVR_DATA_OVERWRITTEN,                        \
+        },                                                              \
+    }
+
 #if defined(__ARMCC_VERSION)
 extern int Image$$RW_IRAM1$$ZI$$Limit;
 #define HEAP_BEGIN      (&Image$$RW_IRAM1$$ZI$$Limit)
