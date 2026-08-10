@@ -6,7 +6,6 @@ cwd = GetCurrentDir()
 # add general drivers
 src = Split('''
 board.c
-startup_stm32f302xc.s
 CubeMX_Config/Src/stm32f3xx_hal_msp.c
 ''')
 

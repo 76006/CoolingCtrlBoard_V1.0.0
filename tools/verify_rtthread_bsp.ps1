@@ -22,7 +22,12 @@ Assert-Contains (Join-Path $bspRoot 'Kconfig') 'CoolingCtrlBoard'
 Assert-Contains (Join-Path $bspRoot 'Kconfig') 'SOC_STM32F302CC'
 Assert-Contains (Join-Path $bspRoot 'rtconfig.py') "MCU='STM32F302xC'"
 Assert-Contains (Join-Path $bspRoot 'README.md') 'STM32F302CCT6'
-Assert-Contains (Join-Path $bspRoot 'board\SConscript') 'startup_stm32f302xc\.s'
+$cmsisStartup = Join-Path $bspRoot '..\libraries\stm32f3_cmsis_driver-latest\Source\Templates\gcc\startup_stm32f302xc.s'
+if (-not (Test-Path -LiteralPath $cmsisStartup))
+{
+    throw "Expected STM32F302xC CMSIS startup file at $cmsisStartup"
+}
+Assert-NotContains (Join-Path $bspRoot 'board\SConscript') 'startup_stm32f302xc\.s'
 Assert-Contains (Join-Path $bspRoot 'board\linker_scripts\link.lds') 'LENGTH = 256K'
 Assert-Contains (Join-Path $bspRoot 'board\linker_scripts\link.lds') 'LENGTH =  *40K'
 Assert-Contains (Join-Path $bspRoot 'board\board.c') 'RCC_PLL_MUL9'

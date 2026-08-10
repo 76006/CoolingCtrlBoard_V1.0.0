@@ -2,6 +2,13 @@ diff --git a/bsp/stm32/libraries/HAL_Drivers/drivers/drv_adc.c b/bsp/stm32/libra
 --- a/bsp/stm32/libraries/HAL_Drivers/drivers/drv_adc.c
 +++ b/bsp/stm32/libraries/HAL_Drivers/drivers/drv_adc.c
 @@
++#ifdef ADC_CHANNEL_0
+     case  0:
+         *stm32_channel = ADC_CHANNEL_0;
+         break;
++#endif /* ADC_CHANNEL_0 */
+     case  1:
+@@
 -#if defined(SOC_SERIES_STM32F0)
 +#if defined(BSP_ADC_SAMPLING_TIME)
 +        ADC_ChanConf.SamplingTime = BSP_ADC_SAMPLING_TIME;
