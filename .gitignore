@@ -1,0 +1,10 @@
+/RT-Thread-v5.2.2/*
+!/RT-Thread-v5.2.2/bsp/
+/RT-Thread-v5.2.2/bsp/*
+!/RT-Thread-v5.2.2/bsp/stm32/
+/RT-Thread-v5.2.2/bsp/stm32/*
+!/RT-Thread-v5.2.2/bsp/stm32/cooling-ctrl-board/
+!/RT-Thread-v5.2.2/bsp/stm32/cooling-ctrl-board/**
+/CoolingCtrlBoard_RTThread/
+/tmp/rt-thread-v5.2.2.zip
+/tmp/rt-thread-v5.2.2-extract/
