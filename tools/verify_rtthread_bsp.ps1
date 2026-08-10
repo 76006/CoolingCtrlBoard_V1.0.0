@@ -69,4 +69,20 @@ Assert-Contains (Join-Path $bspRoot 'board\CubeMX_Config\Src\stm32f3xx_hal_msp.c
 Assert-Contains $adcDriver 'BSP_ADC_SAMPLING_TIME'
 Assert-Contains $adcDriver 'HAL_ADCEx_Calibration_Start.*ADC_SINGLE_ENDED'
 
+$canDriver = Join-Path $bspRoot '..\libraries\HAL_Drivers\drivers\drv_can.c'
+Assert-Contains (Join-Path $bspRoot 'rtconfig.h') 'RT_USING_CAN'
+Assert-Contains (Join-Path $bspRoot 'rtconfig.h') 'BSP_USING_CAN1'
+Assert-Contains (Join-Path $bspRoot 'board\CubeMX_Config\Src\stm32f3xx_hal_msp.c') 'GPIO_PIN_11.*GPIO_PIN_12'
+Assert-Contains (Join-Path $bspRoot 'board\CubeMX_Config\Src\stm32f3xx_hal_msp.c') 'GPIO_AF9_CAN'
+Assert-Contains $canDriver 'SOC_SERIES_STM32F3'
+Assert-Contains $canDriver 'CAN500kBaud.*CAN_SJW_1TQ.*CAN_BS1_15TQ.*CAN_BS2_2TQ.*4'
+Assert-Contains $canDriver 'AutoBusOff = ENABLE'
+Assert-Contains $canDriver 'AutoRetransmission = ENABLE'
+
+$canRate = 36000000 / 4 / (1 + 15 + 2)
+if ($canRate -ne 500000)
+{
+    throw "CAN bit rate is $canRate, expected 500000."
+}
+
 Write-Output 'BSP static checks passed.'

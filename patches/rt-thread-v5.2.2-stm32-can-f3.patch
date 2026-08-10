@@ -1,0 +1,20 @@
+diff --git a/bsp/stm32/libraries/HAL_Drivers/drivers/drv_can.c b/bsp/stm32/libraries/HAL_Drivers/drivers/drv_can.c
+--- a/bsp/stm32/libraries/HAL_Drivers/drivers/drv_can.c
++++ b/bsp/stm32/libraries/HAL_Drivers/drivers/drv_can.c
+@@ -40,0 +41,13 @@
++#elif defined (SOC_SERIES_STM32F3) /* APB1 36 MHz */
++static const struct stm32_baud_rate_tab can_baud_rate_tab[] =
++{
++    {CAN1MBaud,   (CAN_SJW_1TQ | CAN_BS1_15TQ | CAN_BS2_2TQ | 2)},
++    {CAN800kBaud, (CAN_SJW_1TQ | CAN_BS1_11TQ | CAN_BS2_3TQ | 3)},
++    {CAN500kBaud, (CAN_SJW_1TQ | CAN_BS1_15TQ | CAN_BS2_2TQ | 4)},
++    {CAN250kBaud, (CAN_SJW_1TQ | CAN_BS1_15TQ | CAN_BS2_2TQ | 8)},
++    {CAN125kBaud, (CAN_SJW_1TQ | CAN_BS1_15TQ | CAN_BS2_2TQ | 16)},
++    {CAN100kBaud, (CAN_SJW_1TQ | CAN_BS1_15TQ | CAN_BS2_2TQ | 20)},
++    {CAN50kBaud,  (CAN_SJW_1TQ | CAN_BS1_15TQ | CAN_BS2_2TQ | 40)},
++    {CAN20kBaud,  (CAN_SJW_1TQ | CAN_BS1_15TQ | CAN_BS2_2TQ | 100)},
++    {CAN10kBaud,  (CAN_SJW_1TQ | CAN_BS1_15TQ | CAN_BS2_2TQ | 200)}
++};
+@@ -145 +158 @@
+-    drv_can->CanHandle.Init.AutoRetransmission = DISABLE;
++    drv_can->CanHandle.Init.AutoRetransmission = ENABLE;

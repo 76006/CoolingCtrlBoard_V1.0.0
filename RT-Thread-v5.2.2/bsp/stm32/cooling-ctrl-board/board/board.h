@@ -27,6 +27,18 @@ extern "C" {
 #define BOARD_HEATER_POWER_PIN       GET_PIN(B, 0)
 #define BOARD_LIMIT_SWITCH_PIN       GET_PIN(B, 15)
 
+#if defined(STM32F302xC)
+#define CAN1                            CAN
+#define CAN1_TX_IRQn                    USB_HP_CAN_TX_IRQn
+#define CAN1_RX0_IRQn                   USB_LP_CAN_RX0_IRQn
+#define CAN1_RX1_IRQn                   CAN_RX1_IRQn
+#define CAN1_SCE_IRQn                   CAN_SCE_IRQn
+#define CAN1_TX_IRQHandler              USB_HP_CAN_TX_IRQHandler
+#define CAN1_RX0_IRQHandler             USB_LP_CAN_RX0_IRQHandler
+#define CAN1_RX1_IRQHandler             CAN_RX1_IRQHandler
+#define CAN1_SCE_IRQHandler             CAN_SCE_IRQHandler
+#endif
+
 #define BSP_ADC_SAMPLING_TIME        ADC_SAMPLETIME_181CYCLES_5
 
 #define ADC1_CONFIG                                                     \

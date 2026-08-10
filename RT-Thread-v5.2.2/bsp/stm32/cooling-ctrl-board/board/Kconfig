@@ -66,6 +66,16 @@ menu "On-chip Peripheral Drivers"
                 default y
         endif
 
+    menuconfig BSP_USING_CAN
+        bool "Enable CAN"
+        select RT_USING_CAN
+        default y
+        if BSP_USING_CAN
+            config BSP_USING_CAN1
+                bool "Enable CAN1 (PA11/PA12, 500 kbit/s)"
+                default y
+        endif
+
 endmenu
 
 menu "Board extended module Drivers"

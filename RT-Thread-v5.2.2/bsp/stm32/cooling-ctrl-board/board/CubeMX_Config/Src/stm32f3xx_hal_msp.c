@@ -41,6 +41,37 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef *hadc)
     HAL_GPIO_DeInit(GPIOA, GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2);
 }
 
+void HAL_CAN_MspInit(CAN_HandleTypeDef *hcan)
+{
+    GPIO_InitTypeDef gpio = {0};
+
+    if (hcan->Instance != CAN)
+    {
+        return;
+    }
+
+    __HAL_RCC_CAN1_CLK_ENABLE();
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+
+    gpio.Pin = GPIO_PIN_11 | GPIO_PIN_12;
+    gpio.Mode = GPIO_MODE_AF_PP;
+    gpio.Pull = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    gpio.Alternate = GPIO_AF9_CAN;
+    HAL_GPIO_Init(GPIOA, &gpio);
+}
+
+void HAL_CAN_MspDeInit(CAN_HandleTypeDef *hcan)
+{
+    if (hcan->Instance != CAN)
+    {
+        return;
+    }
+
+    __HAL_RCC_CAN1_CLK_DISABLE();
+    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_11 | GPIO_PIN_12);
+}
+
 void HAL_UART_MspInit(UART_HandleTypeDef *huart)
 {
     GPIO_InitTypeDef gpio = {0};
