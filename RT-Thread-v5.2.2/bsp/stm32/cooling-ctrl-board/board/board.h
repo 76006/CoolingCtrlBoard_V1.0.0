@@ -24,6 +24,9 @@ extern "C" {
 #define STM32_SRAM_SIZE              40
 #define STM32_SRAM_END            (0x20000000 + STM32_SRAM_SIZE * 1024)
 
+#define BOARD_HEATER_POWER_PIN       GET_PIN(B, 0)
+#define BOARD_LIMIT_SWITCH_PIN       GET_PIN(B, 15)
+
 #if defined(__ARMCC_VERSION)
 extern int Image$$RW_IRAM1$$ZI$$Limit;
 #define HEAP_BEGIN      (&Image$$RW_IRAM1$$ZI$$Limit)
@@ -44,4 +47,3 @@ void SystemClock_Config(void);
 #endif
 
 #endif
-

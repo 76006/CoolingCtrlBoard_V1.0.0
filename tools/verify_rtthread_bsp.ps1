@@ -17,5 +17,28 @@ Assert-Contains (Join-Path $bspRoot 'README.md') 'STM32F302CCT6'
 Assert-Contains (Join-Path $bspRoot 'board\SConscript') 'startup_stm32f302xc\.s'
 Assert-Contains (Join-Path $bspRoot 'board\linker_scripts\link.lds') 'LENGTH = 256K'
 Assert-Contains (Join-Path $bspRoot 'board\linker_scripts\link.lds') 'LENGTH =  *40K'
+Assert-Contains (Join-Path $bspRoot 'board\board.c') 'RCC_PLL_MUL9'
+Assert-Contains (Join-Path $bspRoot 'board\board.c') 'RCC_HCLK_DIV2'
+Assert-Contains (Join-Path $bspRoot 'board\board.c') 'RCC_USART1CLKSOURCE_PCLK2'
+Assert-Contains (Join-Path $bspRoot 'board\board.c') 'RCC_ADC12PLLCLK_DIV1'
+Assert-Contains (Join-Path $bspRoot 'board\board.c') 'HAL_GPIO_WritePin\(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET\)'
+Assert-Contains (Join-Path $bspRoot 'board\board.c') 'GPIO_MODE_OUTPUT_PP'
+Assert-Contains (Join-Path $bspRoot 'board\board.c') 'GPIO_PIN_15'
+Assert-Contains (Join-Path $bspRoot 'board\board.h') 'BOARD_HEATER_POWER_PIN.*GET_PIN\(B, 0\)'
+Assert-Contains (Join-Path $bspRoot 'board\board.h') 'BOARD_LIMIT_SWITCH_PIN.*GET_PIN\(B, 15\)'
+
+$boardSource = Get-Content -LiteralPath (Join-Path $bspRoot 'board\board.c') -Raw
+$heaterLow = $boardSource.IndexOf('HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET)')
+$heaterOutput = $boardSource.IndexOf('gpio.Mode = GPIO_MODE_OUTPUT_PP')
+$safeInit = $boardSource.IndexOf('cooling_board_safe_gpio_init();')
+$componentInit = $boardSource.IndexOf('rt_components_board_init();')
+if ($heaterLow -lt 0 -or $heaterOutput -lt 0 -or $heaterLow -gt $heaterOutput)
+{
+    throw 'PB0 must be driven low before it is configured as an output.'
+}
+if ($safeInit -lt 0 -or $componentInit -lt 0 -or $safeInit -gt $componentInit)
+{
+    throw 'Safe GPIO initialization must run before RT-Thread components.'
+}
 
 Write-Output 'BSP static checks passed.'
