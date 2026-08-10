@@ -32,7 +32,14 @@ peripheral settings belong to CoolingCtrlBoard.
 PB0 controls `HTR_PWR`. The BSP drives PB0 low before changing it to output
 mode and the milestone application never drives it high.
 
-## Build
+## RT-Thread Studio
+
+The ready-to-import, self-contained Studio project is generated at
+`CoolingCtrlBoard_RTThread` in the repository root. Follow the Chinese guide
+at `README_RTTHREAD_STUDIO.md` in the repository root. The Studio project has
+been verified with the bundled GNU Arm 5.4.1 toolchain.
+
+## Build from the BSP source
 
 Fetch the STM32F3 packages once with RT-Thread Env, then build with the GNU
 Arm toolchain:

@@ -18,9 +18,20 @@ function Assert-NotContains([string]$Path, [string]$Pattern)
     }
 }
 
+function Assert-Exists([string]$Path)
+{
+    if (-not (Test-Path -LiteralPath $Path))
+    {
+        throw "Expected file or directory at $Path"
+    }
+}
+
 Assert-Contains (Join-Path $bspRoot 'Kconfig') 'CoolingCtrlBoard'
 Assert-Contains (Join-Path $bspRoot 'Kconfig') 'SOC_STM32F302CC'
 Assert-Contains (Join-Path $bspRoot 'rtconfig.py') "MCU='STM32F302xC'"
+Assert-Contains (Join-Path $bspRoot 'rtconfig.py') '__RT_KERNEL_SOURCE__'
+Assert-Exists (Join-Path $PSScriptRoot '..\README_RTTHREAD_STUDIO.md')
+Assert-Exists (Join-Path $PSScriptRoot '..\patches\rt-thread-v5.2.2-gcc54-warning-compat.patch')
 Assert-Contains (Join-Path $bspRoot 'README.md') 'STM32F302CCT6'
 $cmsisStartup = Join-Path $bspRoot '..\libraries\stm32f3_cmsis_driver-latest\Source\Templates\gcc\startup_stm32f302xc.s'
 if (-not (Test-Path -LiteralPath $cmsisStartup))
@@ -98,4 +109,34 @@ Assert-Contains $application 'rt_device_find\("can1"\)'
 Assert-Contains $application 'BOARD_HEATER_POWER_PIN.*PIN_LOW'
 Assert-NotContains $application 'rt_pin_write\(BOARD_HEATER_POWER_PIN, PIN_HIGH\)'
 
-Write-Output 'BSP static checks passed.'
+$studioRoot = Join-Path $PSScriptRoot '..\CoolingCtrlBoard_RTThread'
+if (Test-Path -LiteralPath $studioRoot)
+{
+    Assert-Exists (Join-Path $studioRoot '.project')
+    Assert-Exists (Join-Path $studioRoot '.cproject')
+    Assert-Exists (Join-Path $studioRoot '.settings\projcfg.ini')
+    Assert-Exists (Join-Path $studioRoot 'packages\stm32f3_cmsis_driver-latest\Source\Templates\gcc\startup_stm32f302xc.s')
+    Assert-Exists (Join-Path $studioRoot 'packages\stm32f3_hal_driver-latest\Src\stm32f3xx_hal.c')
+    Assert-Exists (Join-Path $studioRoot 'rtthread.bin')
+    Assert-Exists (Join-Path $studioRoot 'Debug\rtthread.bin')
+
+    Assert-Contains (Join-Path $studioRoot '.project') '<name>CoolingCtrlBoard</name>'
+    Assert-Contains (Join-Path $studioRoot '.cproject') 'mcpu=cortex-m4'
+    Assert-Contains (Join-Path $studioRoot '.cproject') 'mfpu=fpv4-sp-d16'
+    Assert-Contains (Join-Path $studioRoot '.cproject') 'mfloat-abi=hard'
+    Assert-Contains (Join-Path $studioRoot '.cproject') 'packages/stm32f3_cmsis_driver-latest/Include'
+    Assert-Contains (Join-Path $studioRoot '.cproject') 'packages/stm32f3_hal_driver-latest/Inc'
+    Assert-Contains (Join-Path $studioRoot '.cproject') '-D__RT_KERNEL_SOURCE__'
+    Assert-Contains (Join-Path $studioRoot '.settings\projcfg.ini') 'is_use_scons_build=true'
+    Assert-Contains (Join-Path $studioRoot 'libraries\HAL_Drivers\drivers\drv_adc.c') 'BSP_ADC_SAMPLING_TIME'
+    Assert-Contains (Join-Path $studioRoot 'libraries\HAL_Drivers\drivers\drv_can.c') 'CAN500kBaud.*CAN_SJW_1TQ.*CAN_BS1_15TQ.*CAN_BS2_2TQ.*4'
+    Assert-NotContains (Join-Path $studioRoot 'rt-thread\src\SConscript') 'Wimplicit-fallthrough|Wduplicated-cond|Wduplicated-branches'
+
+    $gitMetadata = @(Get-ChildItem -LiteralPath $studioRoot -Recurse -Directory -Force -Filter '.git' -ErrorAction Stop)
+    if ($gitMetadata.Count -ne 0)
+    {
+        throw "Standalone Studio project contains nested Git metadata: $($gitMetadata.FullName -join ', ')"
+    }
+}
+
+Write-Output 'BSP and Studio distribution static checks passed.'

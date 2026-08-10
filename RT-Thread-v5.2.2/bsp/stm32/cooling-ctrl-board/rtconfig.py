@@ -45,7 +45,11 @@ if PLATFORM == 'gcc':
     OBJCPY = PREFIX + 'objcopy'
 
     DEVICE = ' -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard -ffunction-sections -fdata-sections'
-    CFLAGS = DEVICE + ' -Wall -Dgcc'
+    # The RT-Thread Studio Eclipse generator cannot preserve the kernel
+    # group's LOCAL_CPPDEFINES. Keep the scheduler's internal prototypes
+    # visible so the generated Studio project builds without implicit
+    # declaration warnings.
+    CFLAGS = DEVICE + ' -Wall -Dgcc -D__RT_KERNEL_SOURCE__'
     AFLAGS = ' -c' + DEVICE + ' -x assembler-with-cpp -Wa,-mimplicit-it=thumb '
     LFLAGS = DEVICE + ' -Wl,--gc-sections,-Map=rt-thread.map,-cref,-u,Reset_Handler -T board/linker_scripts/link.lds'
 

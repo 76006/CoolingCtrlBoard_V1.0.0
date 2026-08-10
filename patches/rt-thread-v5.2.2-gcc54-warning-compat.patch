@@ -1,0 +1,12 @@
+diff --git a/src/SConscript b/src/SConscript
+--- a/src/SConscript
++++ b/src/SConscript
+@@ -38,9 +38,6 @@ if rtconfig.PLATFORM in ['gcc']: # only for GCC
+     LOCAL_CFLAGS += ' -Wreturn-type -Wcomment -Wswitch' # code style warning
+     LOCAL_CFLAGS += ' -Wparentheses -Wlogical-op ' # operation warning
+     LOCAL_CFLAGS += ' -Wmissing-declarations -Wmissing-prototypes -Wstrict-prototypes' # function declaration warning
+-    if 'mips' not in rtconfig.PREFIX: # mips toolchain does not support
+-        LOCAL_CFLAGS += ' -Wimplicit-fallthrough' # implicit fallthrough warning
+-        LOCAL_CFLAGS += ' -Wduplicated-cond -Wduplicated-branches' # duplicated condition warning
+     if rtconfig.ARCH not in ['sim']:
+         LINKFLAGS += ' -Wl,--gc-sections,--print-memory-usage' # remove unused sections and print memory usage
