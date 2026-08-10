@@ -85,4 +85,12 @@ if ($canRate -ne 500000)
     throw "CAN bit rate is $canRate, expected 500000."
 }
 
+$application = Join-Path $bspRoot 'applications\main.c'
+Assert-Contains $application 'CoolingCtrlBoard'
+Assert-Contains $application 'rt_device_find\("uart1"\)'
+Assert-Contains $application 'rt_device_find\("adc1"\)'
+Assert-Contains $application 'rt_device_find\("can1"\)'
+Assert-Contains $application 'BOARD_HEATER_POWER_PIN.*PIN_LOW'
+Assert-NotContains $application 'rt_pin_write\(BOARD_HEATER_POWER_PIN, PIN_HIGH\)'
+
 Write-Output 'BSP static checks passed.'

@@ -1,36 +1,26 @@
 /*
- * Copyright (c) 2006-2021, RT-Thread Development Team
+ * Copyright (c) 2006-2026, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
- *
- * Change Logs:
- * Date           Author       Notes
- * 2018-11-06     SummerGift   first version
- * 2023-12-03     Meco Man     support nano version
  */
 
-#include <board.h>
 #include <rtthread.h>
-#include <drv_gpio.h>
-#ifndef RT_USING_NANO
 #include <rtdevice.h>
-#endif /* RT_USING_NANO */
-
-/* defined the LED0 pin: PB13 */
-#define LED0_PIN    GET_PIN(B, 13)
+#include <board.h>
+#include <drv_gpio.h>
 
 int main(void)
 {
-    /* set LED pin mode to output */
-    rt_pin_mode(LED0_PIN, PIN_MODE_OUTPUT);
+    rt_pin_mode(BOARD_HEATER_POWER_PIN, PIN_MODE_OUTPUT);
+    rt_pin_write(BOARD_HEATER_POWER_PIN, PIN_LOW);
+    rt_pin_mode(BOARD_LIMIT_SWITCH_PIN, PIN_MODE_INPUT);
 
-    while (1)
-    {
-        rt_pin_write(LED0_PIN, PIN_HIGH);
-        rt_thread_mdelay(500);
-        rt_pin_write(LED0_PIN, PIN_LOW);
-        rt_thread_mdelay(500);
-    }
+    rt_kprintf("CoolingCtrlBoard / STM32F302CCT6 / %u Hz\n",
+               (unsigned int)SystemCoreClock);
+    rt_kprintf("uart1: %s\n", rt_device_find("uart1") ? "ready" : "missing");
+    rt_kprintf("adc1: %s\n", rt_device_find("adc1") ? "ready" : "missing");
+    rt_kprintf("can1: %s\n", rt_device_find("can1") ? "ready" : "missing");
+    rt_kprintf("limit switch: %d\n", rt_pin_read(BOARD_LIMIT_SWITCH_PIN));
 
     return RT_EOK;
 }
