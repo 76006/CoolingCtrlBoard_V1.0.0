@@ -10,6 +10,14 @@ function Assert-Contains([string]$Path, [string]$Pattern)
     }
 }
 
+function Assert-NotContains([string]$Path, [string]$Pattern)
+{
+    if (Select-String -LiteralPath $Path -Pattern $Pattern -Quiet)
+    {
+        throw "Unexpected '$Pattern' in $Path"
+    }
+}
+
 Assert-Contains (Join-Path $bspRoot 'Kconfig') 'CoolingCtrlBoard'
 Assert-Contains (Join-Path $bspRoot 'Kconfig') 'SOC_STM32F302CC'
 Assert-Contains (Join-Path $bspRoot 'rtconfig.py') "MCU='STM32F302xC'"
@@ -40,5 +48,16 @@ if ($safeInit -lt 0 -or $componentInit -lt 0 -or $safeInit -gt $componentInit)
 {
     throw 'Safe GPIO initialization must run before RT-Thread components.'
 }
+
+Assert-Contains (Join-Path $bspRoot 'rtconfig.h') 'RT_USING_SERIAL'
+Assert-Contains (Join-Path $bspRoot 'rtconfig.h') 'RT_USING_CONSOLE'
+Assert-Contains (Join-Path $bspRoot 'rtconfig.h') 'RT_CONSOLE_DEVICE_NAME "uart1"'
+Assert-Contains (Join-Path $bspRoot 'rtconfig.h') 'RT_USING_FINSH'
+Assert-Contains (Join-Path $bspRoot 'rtconfig.h') 'FINSH_USING_MSH'
+Assert-Contains (Join-Path $bspRoot 'rtconfig.h') 'BSP_USING_UART1'
+Assert-NotContains (Join-Path $bspRoot 'rtconfig.h') 'BSP_UART1_.*USING_DMA'
+Assert-Contains (Join-Path $bspRoot 'board\CubeMX_Config\Src\stm32f3xx_hal_msp.c') 'GPIO_PIN_6'
+Assert-Contains (Join-Path $bspRoot 'board\CubeMX_Config\Src\stm32f3xx_hal_msp.c') 'GPIO_PIN_7'
+Assert-Contains (Join-Path $bspRoot 'board\CubeMX_Config\Src\stm32f3xx_hal_msp.c') 'GPIO_AF7_USART1'
 
 Write-Output 'BSP static checks passed.'

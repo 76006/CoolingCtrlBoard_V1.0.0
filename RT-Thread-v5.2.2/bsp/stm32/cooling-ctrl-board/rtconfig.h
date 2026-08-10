@@ -104,7 +104,7 @@
 #define RT_USING_DEVICE
 #define RT_USING_CONSOLE
 #define RT_CONSOLEBUF_SIZE 128
-#define RT_CONSOLE_DEVICE_NAME "uart2"
+#define RT_CONSOLE_DEVICE_NAME "uart1"
 #define RT_VER_NUM 0x50201
 #define RT_BACKTRACE_LEVEL_MAX_NR 32
 /* end of RT-Thread Kernel */
@@ -414,7 +414,7 @@
 #define BSP_USING_GPIO
 #define BSP_USING_UART
 #define BSP_STM32_UART_V1_TX_TIMEOUT 2000
-#define BSP_USING_UART2
+#define BSP_USING_UART1
 /* end of On-chip Peripheral Drivers */
 
 /* Board extended module Drivers */
