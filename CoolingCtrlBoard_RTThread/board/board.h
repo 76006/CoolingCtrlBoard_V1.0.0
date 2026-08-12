@@ -27,6 +27,11 @@ extern "C" {
 #define BOARD_HEATER_POWER_PIN       GET_PIN(B, 0)
 #define BOARD_LIMIT_SWITCH_PIN       GET_PIN(B, 15)
 
+/* 三路业务模拟量到 STM32 ADC1 通道的板级映射。 */
+#define BOARD_NTC0_ADC_CHANNEL       1
+#define BOARD_NTC1_ADC_CHANNEL       2
+#define BOARD_HYSN_ADC_CHANNEL       3
+
 #if defined(STM32F302xC)
 #define CAN1                            CAN
 #define CAN1_TX_IRQn                    USB_HP_CAN_TX_IRQn

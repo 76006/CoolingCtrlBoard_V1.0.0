@@ -36,6 +36,47 @@ D:\workspace\CoolingCtrlBoard_V1.0.0\CoolingCtrlBoard_RTThread
 
 两种方式均已验证成功。Debug 托管构建使用 `-O0`，固件较大；SCons 使用 `-O2`，固件较小，这是正常现象。
 
+## 2.1 ADC、开关任务和 CAN 取值接口
+
+应用启动后会创建两个后台任务：
+
+- ADC 任务每 100 ms 依次采集 `NTC_ADC0`、`NTC_ADC1` 和 `HYSN_ADC2`。每路先经过 5 点中值滤波去除孤立毛刺，再经过系数为 1/4 的整数 IIR 滤波。
+- 开关任务每 10 ms 读取一次 PB15，连续 5 次相同后才更新稳定值，因此消抖时间约为 50 ms。
+- PB0 加热输出始终默认关闭。任务不会自动开启加热，只有应用显式调用 `cooling_heater_set(RT_TRUE)` 才会拉高；调用方必须自行实现温度、限位和超时联锁。
+
+代码按以下层次组织：
+
+```text
+main.c                         启动入口
+  ├─ cooling_adc.c             ADC 任务、快照发布
+  │    └─ cooling_filter.c     纯 C 中值/IIR 算法
+  └─ cooling_switch.c          开关消抖、输出状态
+       ↓
+cooling_board_port.c           RT-Thread ADC/GPIO 板级适配
+       ↓
+board.h + RT-Thread BSP        STM32 引脚、通道和底层驱动
+```
+
+采样周期、滤波参数、线程栈和优先级统一放在 `applications/cooling_config.h`。业务通道定义放在 `applications/cooling_channels.h`。如果移植到另一块板，优先修改 `board.h`、`cooling_board_port.c` 和 `cooling_config.h`；ADC/开关服务及未来 CAN 代码可以保持不变。
+
+ADC 的公共数据结构和接口位于 `applications/cooling_adc.h`：
+
+```c
+cooling_adc_snapshot_t adc;
+
+if (cooling_adc_get_snapshot(&adc) == RT_EOK &&
+    adc.valid_mask == COOLING_ADC_VALID_ALL)
+{
+    /* adc.value[COOLING_ADC_NTC0].filtered   - 滤波后的 12 位 ADC 值 */
+    /* adc.value[COOLING_ADC_NTC0].millivolts - 按 3.3 V 标称参考值换算 */
+    /* 在这里逐字段装入 CAN 数据帧，不要直接发送整个结构体。 */
+}
+```
+
+开关状态通过 `cooling_switch_get_snapshot()` 取得。`limit_level` 是消抖后的 PB15 电平，`limit_valid` 表示消抖结果是否已经有效，`heater_on` 是当前加热输出命令状态。
+
+串口 MSH 中可以执行 `adc_values` 查看三路 ADC 原始值、滤波值和毫伏值，执行 `io_values` 查看限位开关与加热输出状态。当前没有加入 NTC 温度曲线，因为热敏电阻型号、分压电阻和 B 值尚未确定。
+
 ## 3. 当前硬件配置
 
 | 功能 | 引脚 | 配置 |

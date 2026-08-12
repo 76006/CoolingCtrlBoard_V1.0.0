@@ -7,3 +7,4 @@
 !/RT-Thread-v5.2.2/bsp/stm32/cooling-ctrl-board/**
 /.superpowers/
 /tmp/
+/coolpack/
