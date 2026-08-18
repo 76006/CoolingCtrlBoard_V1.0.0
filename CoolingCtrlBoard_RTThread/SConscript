@@ -12,6 +12,9 @@ env.Append(CPPDEFINES = [rtconfig.MCU])
 
 for d in list:
     path = os.path.join(cwd, d)
+    # Bootloader 使用独立配置和链接脚本，不能混入 App 镜像。
+    if d == 'bootloader':
+        continue
     if os.path.isfile(os.path.join(path, 'SConscript')):
         objs = objs + SConscript(os.path.join(d, 'SConscript'))
 

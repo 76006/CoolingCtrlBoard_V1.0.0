@@ -1,0 +1,20 @@
+from building import *
+import os
+
+cwd = GetCurrentDir()
+src = Split('''
+fota_crc.c
+fota_rbl.c
+fota_meta.c
+fota_storage.c
+fota_can.c
+fal_flash_f302.c
+can/can_codec.c
+can/can_port_rtthread.c
+can/can_bus.c
+''')
+
+group = DefineGroup('CoolingFOTACommon', src, depend=[''],
+                    CPPPATH=[cwd, os.path.join(cwd, 'can')])
+
+Return('group')

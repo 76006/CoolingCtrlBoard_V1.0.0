@@ -1,6 +1,10 @@
 /*
  * CoolingCtrlBoard RT-Thread/STM32 板级适配实现
  *
+ * 负责业务通道到 STM32 ADC 通道的映射、ADC 设备访问、LS 输入读取和
+ * 加热 GPIO 输出。应用层不得绕过本文件直接依赖具体 MCU 驱动，移植
+ * 到其他芯片或修改引脚时主要调整本文件及 board.h。
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -108,15 +112,19 @@ rt_err_t cooling_board_adc_read(cooling_adc_input_t input, rt_uint16_t *raw)
     return RT_EOK;
 }
 
-void cooling_board_io_init(void)
+void cooling_board_heater_init(void)
 {
     /* 先写低再设置输出模式，避免初始化瞬间误开启加热功率级。 */
     rt_pin_write(BOARD_HEATER_POWER_PIN, PIN_LOW);
     rt_pin_mode(BOARD_HEATER_POWER_PIN, PIN_MODE_OUTPUT);
+}
+
+void cooling_board_tank_input_init(void)
+{
     rt_pin_mode(BOARD_LIMIT_SWITCH_PIN, PIN_MODE_INPUT);
 }
 
-rt_uint8_t cooling_board_limit_read(void)
+rt_uint8_t cooling_board_tank_read(void)
 {
     return (rt_uint8_t)rt_pin_read(BOARD_LIMIT_SWITCH_PIN);
 }

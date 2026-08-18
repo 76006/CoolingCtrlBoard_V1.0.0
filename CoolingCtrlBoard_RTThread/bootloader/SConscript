@@ -1,0 +1,51 @@
+import os
+Import('RTT_ROOT')
+Import('env')
+from building import *
+
+cwd = GetCurrentDir()
+root = os.path.abspath(os.path.join(cwd, '..'))
+env.Append(CPPDEFINES=[rtconfig.MCU, 'COOLING_BOOTLOADER_BUILD'])
+
+src = [
+    'main.c',
+    'boot_fota.c',
+    'uid_key_slot.c',
+    os.path.join(root, 'board', 'board.c'),
+    os.path.join(root, 'board', 'CubeMX_Config', 'Src', 'stm32f3xx_hal_msp.c'),
+    os.path.join(root, 'common', 'fal_flash_f302.c'),
+    os.path.join(root, 'common', 'fota_crc.c'),
+    os.path.join(root, 'common', 'fota_rbl.c'),
+    os.path.join(root, 'common', 'fota_meta.c'),
+    os.path.join(root, 'common', 'fota_storage.c'),
+    os.path.join(root, 'common', 'fota_can.c'),
+    os.path.join(root, 'common', 'can', 'can_port_rtthread.c'),
+    os.path.join(root, 'common', 'can', 'can_bus.c'),
+    os.path.join(root, 'applications', 'uid_encry', 'my_encry.c'),
+    os.path.join(root, 'applications', 'uid_encry', 'UID_Encryption.c'),
+]
+
+path = [
+    cwd,
+    os.path.join(root, 'board'),
+    os.path.join(root, 'board', 'CubeMX_Config', 'Inc'),
+    os.path.join(root, 'common'),
+    os.path.join(root, 'common', 'can'),
+    os.path.join(root, 'applications'),
+    os.path.join(root, 'applications', 'uid_encry'),
+]
+
+group = DefineGroup('CoolingBootloader', src, depend=[''], CPPPATH=path)
+
+# 各软件包显式映射到 Bootloader 自己的 build 目录，不能复用 App 的 .o。
+for package_name in [
+    'CMSIS-Core-latest',
+    'stm32f3_cmsis_driver-latest',
+    'stm32f3_hal_driver-latest',
+]:
+    group = group + SConscript(
+        os.path.join(root, 'packages', package_name, 'SConscript'),
+        variant_dir=os.path.join('build', 'packages', package_name),
+        duplicate=0)
+
+Return('group')

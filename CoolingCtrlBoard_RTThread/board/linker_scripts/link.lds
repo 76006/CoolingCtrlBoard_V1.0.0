@@ -3,7 +3,8 @@
 /* Program Entry, set to mark it as "used" and avoid gc */
 MEMORY
 {
-    ROM (rx) : ORIGIN = 0x08000000, LENGTH = 256K /* 256 KiB Flash */
+    /* App BIN 加上 96-byte RBL header 后也必须能放入同尺寸 download 分区。 */
+    ROM (rx) : ORIGIN = 0x08008000, LENGTH = 0x1A7A0
     RAM (rw) : ORIGIN = 0x20000000, LENGTH =  40K /* 40 KiB SRAM */
 }
 ENTRY(Reset_Handler)

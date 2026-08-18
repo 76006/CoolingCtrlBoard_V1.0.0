@@ -1,6 +1,10 @@
 /*
  * CoolingCtrlBoard ADC 滤波算法实现
  *
+ * 对每路 ADC 先执行小窗口中值滤波以抑制尖峰，再执行整数 IIR 平滑。
+ * 本文件为纯 C 算法，不依赖 RT-Thread、HAL 或动态内存，便于移植和
+ * 独立测试；滤波参数集中定义在 cooling_config.h。
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 

@@ -1,4 +1,10 @@
 /*
+ * CoolingCtrlBoard 板级公共配置
+ *
+ * 定义 STM32F302CCT6 的 Flash/SRAM 容量、加热与 LS 引脚、ADC 通道
+ * 映射以及 RT-Thread 堆边界。应用层通过这些逻辑名称访问硬件，避免
+ * 在业务代码中散布具体 GPIO 和 ADC 通道号。
+ *
  * Copyright (c) 2006-2021, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0

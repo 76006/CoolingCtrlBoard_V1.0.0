@@ -154,6 +154,8 @@
 #define RT_CAN_NB_TX_FIFO_SIZE 256
 #define RT_USING_ADC
 #define RT_USING_PIN
+#define RT_USING_FAL
+#define FAL_PART_HAS_TABLE_CFG
 /* end of Device Drivers */
 
 /* C/C++ and POSIX layer */
@@ -445,6 +447,7 @@
 #define BSP_USING_ADC1
 #define BSP_USING_CAN
 #define BSP_USING_CAN1
+#define BSP_USING_ON_CHIP_FLASH
 /* end of On-chip Peripheral Drivers */
 
 /* Board extended module Drivers */

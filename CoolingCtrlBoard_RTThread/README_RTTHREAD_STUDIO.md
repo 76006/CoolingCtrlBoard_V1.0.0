@@ -34,7 +34,22 @@ D:\workspace\CoolingCtrlBoard_V1.0.0\CoolingCtrlBoard_RTThread
 - Studio 托管构建：`CoolingCtrlBoard_RTThread\Debug\rtthread.elf` 和 `rtthread.bin`
 - Studio SCons 构建：`CoolingCtrlBoard_RTThread\rt-thread.elf` 和 `rtthread.bin`
 
-两种方式均已验证成功。Debug 托管构建使用 `-O0`，固件较大；SCons 使用 `-O2`，固件较小，这是正常现象。
+两种构建方式均已配置为体积优化 `-Os`，以确保 App 能放入 OTA 的 106 KiB 分区。修改构建配置后，请先执行一次 `Project` -> `Clean...`，再重新 `Build Project`，避免继续链接旧的 `-O0` 目标文件。
+
+### 正点原子下载器 UID 密钥
+
+正点原子 UID 自定义加密 V1.2 已接入 App。12 字节密钥位于 Bootloader 最后一个独立 Flash 页的页首：
+
+```text
+Flash 地址：0x08007800
+Bootloader BIN 内偏移：0x00007800
+密钥长度：12 字节
+算法配置：算法 3，大端序
+```
+
+`cooling_bootloader.bin` 在该位置预置 12 个 `0xFF`，下载器首次烧录前直接将计算出的密钥覆盖到这里。该页不属于 App、下载区或参数区，后续 RBL OTA 不会擦除密钥。
+
+Bootloader 和 App 都会在板级初始化最前端校验密钥。校验失败时，串口、CAN、ADC、FinSH 和所有业务线程都不会初始化；串口/CAN 引脚恢复为模拟输入，加热输出保持关闭，系统静默锁定。此状态只能通过下载器重新烧录正确密钥或完整固件恢复。
 
 ## 2.1 ADC、开关任务和 CAN 取值接口
 
@@ -154,3 +169,7 @@ limit switch: 0
 - USART1、ADC1、CAN 500 kbit/s 和 PB0 安全初始化已做静态检查。
 
 剩余工作是连接实体板，完成 ST-LINK 下载、72 MHz 时钟、串口、ADC、CAN 和限位开关的实机验证。
+
+## 8. Bootloader/App 双目标和 OTA
+
+工程现已包含 Bootloader/App 两个构建目标。两份 BIN、首次合并镜像、RBL 打包参数、CAN 升级协议和掉电测试步骤请查看 `OTA移植说明.md`。App 的链接地址已经改为 `0x08008000`，因此不能再将普通 `rtthread.bin` 当作地址为 `0x08000000` 的单体程序烧录。

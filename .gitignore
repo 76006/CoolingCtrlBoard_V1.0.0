@@ -6,5 +6,7 @@
 !/RT-Thread-v5.2.2/bsp/stm32/cooling-ctrl-board/
 !/RT-Thread-v5.2.2/bsp/stm32/cooling-ctrl-board/**
 /.superpowers/
+/.claude/
 /tmp/
 /coolpack/
+~$*.xlsx

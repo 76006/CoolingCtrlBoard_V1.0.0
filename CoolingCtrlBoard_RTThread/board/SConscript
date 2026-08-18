@@ -11,6 +11,7 @@ CubeMX_Config/Src/stm32f3xx_hal_msp.c
 
 path =  [cwd]
 path += [cwd + '/CubeMX_Config/Inc']
+path += [os.path.join(cwd, '..', 'common')]
 
 
 group = DefineGroup('Drivers', src, depend = [''], CPPPATH = path)

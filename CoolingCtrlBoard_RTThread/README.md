@@ -50,3 +50,12 @@ scons -j4
 
 Hardware behavior must be verified on the custom board before the heater or
 CAN network is used in a live system.
+
+## CAN OTA
+
+The project now contains two build targets in one source tree: a 32 KiB
+Bootloader at `0x08000000` and an App at `0x08008000`. Run
+`tools/build_firmware.ps1 -Target All` to generate the two initial-download
+BIN files and an optional combined factory image. RBL packaging, the exact
+Flash map, CAN protocol, power-loss behavior, and board test procedure are
+documented in `OTA移植说明.md`.
