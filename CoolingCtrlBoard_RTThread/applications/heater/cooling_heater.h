@@ -25,10 +25,9 @@ typedef struct
 } cooling_heater_snapshot_t;
 
 /*
- * 启动加热模块：必须先硬件拉低再建立内部状态；
- * 重复调用幂等，任何失败路径都保持加热关闭。
+ * 启动加热模块：必须先硬件拉低再建立内部状态。
  */
-rt_err_t cooling_heater_start(void);
+void cooling_heater_start(void);
 
 /*
  * 设置加热输出。false 请求永远允许并立即写低；
@@ -38,7 +37,7 @@ rt_err_t cooling_heater_start(void);
 rt_err_t cooling_heater_set(rt_bool_t enabled);
 
 /* 复制一份线程安全的加热快照；不能在中断中调用。 */
-rt_err_t cooling_heater_get_snapshot(cooling_heater_snapshot_t *snapshot);
+void cooling_heater_get_snapshot(cooling_heater_snapshot_t *snapshot);
 
 #ifdef __cplusplus
 }

@@ -13,37 +13,10 @@
 #include "cooling_flash_layout.h"
 #include "fota_crc.h"
 
-static int fota_storage_open(const char *name, fota_storage_reader_t *reader)
-{
-    if (reader == NULL)
-    {
-        return -1;
-    }
-
-    reader->partition = fal_partition_find(name);
-    return reader->partition != NULL ? 0 : -1;
-}
-
-int fota_storage_open_download(fota_storage_reader_t *reader)
-{
-    return fota_storage_open(COOLING_FAL_DOWNLOAD_PART_NAME, reader);
-}
-
-int fota_storage_open_app(fota_storage_reader_t *reader)
-{
-    return fota_storage_open(COOLING_FAL_APP_PART_NAME, reader);
-}
-
 int fota_storage_read(void *context, uint32_t offset,
                       uint8_t *buffer, size_t size)
 {
     fota_storage_reader_t *reader = (fota_storage_reader_t *)context;
-
-    if ((reader == NULL) || (reader->partition == NULL) ||
-        (buffer == NULL))
-    {
-        return -1;
-    }
 
     return fal_partition_read(reader->partition, offset, buffer, size);
 }
@@ -54,11 +27,6 @@ int fota_storage_crc32(const struct fal_partition *partition,
     uint8_t buffer[256];
     uint32_t position = 0U;
     uint32_t crc = FOTA_CRC32_INITIAL_VALUE;
-
-    if ((partition == NULL) || (crc_out == NULL) || (size > partition->len))
-    {
-        return -1;
-    }
 
     while (position < size)
     {

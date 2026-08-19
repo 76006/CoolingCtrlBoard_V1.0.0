@@ -1,8 +1,8 @@
 /*
- * CoolingCtrlBoard ADC 采样服务公共接口
+ * CoolingCtrlBoard ADC 采样、滤波与传感器换算公共接口
  *
- * CAN 等上层任务只需要包含本文件并读取数据快照，不需要了解
- * ADC 驱动、引脚映射和滤波器内部实现。
+ * 负责发布滤波后的 ADC 数据，并提供压力、温度定点值换算。
+ * 上层不需要了解 ADC 驱动、引脚映射和滤波器内部实现。
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -10,9 +10,10 @@
 #ifndef APPLICATIONS_COOLING_ADC_H
 #define APPLICATIONS_COOLING_ADC_H
 
+#include <stdint.h>
 #include <rtthread.h>
 
-#include "cooling_channels.h"
+#include "cooling_adc_channels.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,14 +37,21 @@ typedef struct
     cooling_adc_value_t value[COOLING_ADC_CHANNEL_COUNT];
 } cooling_adc_snapshot_t;
 
-/* 启动周期采样服务；重复调用不会重复创建线程。 */
+/* 启动周期采样服务。 */
 rt_err_t cooling_adc_start(void);
 
 /*
  * 为其他线程复制一份完整、一致的数据快照，例如供 CAN 发送任务使用。
  * 使用某一路之前必须检查 valid_mask。本函数内部使用互斥量，不能在中断中调用。
  */
-rt_err_t cooling_adc_get_snapshot(cooling_adc_snapshot_t *snapshot);
+void cooling_adc_get_snapshot(cooling_adc_snapshot_t *snapshot);
+
+/* 滤波 ADC 值换算为 0.001 MPa；未标定时返回 -1。 */
+int cooling_sensor_pressure_mpa1000(uint16_t filtered_adc,
+                                    uint16_t *pressure_mpa1000);
+
+/* 读取温度通道并换算为 0.1 摄氏度；无效或未标定时返回 -1。 */
+int cooling_sensor_temperature_deg10(uint16_t *temperature_deg10);
 
 #ifdef __cplusplus
 }

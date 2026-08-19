@@ -27,14 +27,6 @@ static void boot_ota_completed(void)
 
 int main(void)
 {
-    static const can_bus_config_t bus_config =
-    {
-        "can1",
-        FOTA_CAN_DEFAULT_BAUD_RATE,
-        2048U,
-        18U,
-        10U
-    };
     static const fota_can_config_t can_config =
     {
         FOTA_CAN_DEFAULT_CTRL_ID,
@@ -46,10 +38,7 @@ int main(void)
 
     /* READY 或 COPYING 都会在这里安装；COPYING 表示上次复制中掉过电。 */
     (void)boot_fota_install_pending();
-    if (can_bus_start(&bus_config) == 0)
-    {
-        (void)fota_can_start(&can_config);
-    }
+    (void)fota_can_start(&can_config);
 
     if (boot_fota_app_is_valid())
     {

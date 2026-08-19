@@ -35,8 +35,6 @@ typedef struct
 int fota_meta_load(fota_meta_info_t *info);
 
 /* 采用双页交替和最后提交标记，原记录在新记录完全写好前不会被擦除。 */
-int fota_meta_store(const fota_meta_info_t *info);
-
 int fota_meta_set(fota_meta_state_t state,
                   uint32_t rbl_size,
                   uint32_t rbl_crc,

@@ -1,5 +1,5 @@
 /*
- * CoolingCtrlBoard RT-Thread/STM32 板级适配实现
+ * CoolingCtrlBoard RT-Thread/STM32 硬件适配实现
  *
  * 负责业务通道到 STM32 ADC 通道的映射、ADC 设备访问、LS 输入读取和
  * 加热 GPIO 输出。应用层不得绕过本文件直接依赖具体 MCU 驱动，移植
@@ -30,13 +30,6 @@ static rt_adc_device_t board_adc_device;
 
 rt_err_t cooling_board_adc_init(void)
 {
-    rt_err_t result;
-
-    if (board_adc_device != RT_NULL)
-    {
-        return RT_EOK;
-    }
-
     board_adc_device =
         (rt_adc_device_t)rt_device_find(BOARD_ADC_DEVICE_NAME);
     if (board_adc_device == RT_NULL)
@@ -44,23 +37,14 @@ rt_err_t cooling_board_adc_init(void)
         return -RT_ENOSYS;
     }
 
-    result = rt_device_open((rt_device_t)board_adc_device,
-                            RT_DEVICE_OFLAG_RDONLY);
-    if (result != RT_EOK)
-    {
-        board_adc_device = RT_NULL;
-    }
-
-    return result;
+    return rt_device_open((rt_device_t)board_adc_device,
+                          RT_DEVICE_OFLAG_RDONLY);
 }
 
 void cooling_board_adc_deinit(void)
 {
-    if (board_adc_device != RT_NULL)
-    {
-        rt_device_close((rt_device_t)board_adc_device);
-        board_adc_device = RT_NULL;
-    }
+    rt_device_close((rt_device_t)board_adc_device);
+    board_adc_device = RT_NULL;
 }
 
 rt_err_t cooling_board_adc_read(cooling_adc_input_t input, rt_uint16_t *raw)
@@ -70,15 +54,6 @@ rt_err_t cooling_board_adc_read(cooling_adc_input_t input, rt_uint16_t *raw)
     rt_ssize_t read_count;
     rt_err_t result;
     rt_err_t stop_result;
-
-    if ((raw == RT_NULL) || (input_index >= COOLING_ADC_CHANNEL_COUNT))
-    {
-        return -RT_EINVAL;
-    }
-    if (board_adc_device == RT_NULL)
-    {
-        return -RT_ENOSYS;
-    }
 
     /* STM32 当前配置为单通道转换，因此每次读取前重新选择通道。 */
     result = rt_adc_enable(board_adc_device, board_adc_channel[input_index]);
@@ -103,10 +78,6 @@ rt_err_t cooling_board_adc_read(cooling_adc_input_t input, rt_uint16_t *raw)
         return stop_result;
     }
 
-    if (sample > COOLING_ADC_FULL_SCALE)
-    {
-        sample = COOLING_ADC_FULL_SCALE;
-    }
     *raw = (rt_uint16_t)sample;
 
     return RT_EOK;

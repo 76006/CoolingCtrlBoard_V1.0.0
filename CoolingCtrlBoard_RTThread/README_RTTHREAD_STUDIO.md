@@ -51,46 +51,49 @@ Bootloader BIN 内偏移：0x00007800
 
 Bootloader 和 App 都会在板级初始化最前端校验密钥。校验失败时，串口、CAN、ADC、FinSH 和所有业务线程都不会初始化；串口/CAN 引脚恢复为模拟输入，加热输出保持关闭，系统静默锁定。此状态只能通过下载器重新烧录正确密钥或完整固件恢复。
 
-## 2.1 ADC、开关任务和 CAN 取值接口
+## 2.1 业务任务和数据接口
 
-应用启动后会创建两个后台任务：
+应用启动后主要运行以下任务：
 
-- ADC 任务每 100 ms 依次采集 `NTC_ADC0`、`NTC_ADC1` 和 `HYSN_ADC2`。每路先经过 5 点中值滤波去除孤立毛刺，再经过系数为 1/4 的整数 IIR 滤波。
-- 开关任务每 10 ms 读取一次 PB15，连续 5 次相同后才更新稳定值，因此消抖时间约为 50 ms。
-- PB0 加热输出始终默认关闭。任务不会自动开启加热，只有应用显式调用 `cooling_heater_set(RT_TRUE)` 才会拉高；调用方必须自行实现温度、限位和超时联锁。
+- `adcflt`：每 100 ms 采集三路 ADC，并完成中值与 IIR 滤波。
+- `tankmon`：每 10 ms 读取 PB15，连续 5 次相同后确认罐体状态。
+- `pressctl`：读取 ADC 与安全快照，执行压力状态机和软件 PWM。
+- `can_rx`、`canstatus`：接收命令并每 2 秒上报状态。
+- `otawork`：串行执行 OTA Flash 擦写与校验。
 
-代码按以下层次组织：
+PB0 默认关闭。只有 `pressure/cooling_pressure.c` 能请求开启加热，最终仍由
+`cooling_heater.c` 按授权、标定、上电、自动控制、罐体和 OTA 状态裁决。
 
 ```text
-main.c                         启动入口
-  ├─ cooling_adc.c             ADC 任务、快照发布
-  │    └─ cooling_filter.c     纯 C 中值/IIR 算法
-  └─ cooling_switch.c          开关消抖、输出状态
+main.c
+  ├─ adc/cooling_adc.c
+  ├─ tank/cooling_tank.c
+  ├─ pressure/cooling_pressure.c
+  ├─ can/cooling_can.c
+  ├─ safety/cooling_safety.c
+  ├─ heater/cooling_heater.c
+  └─ ota/cooling_ota.c
        ↓
-cooling_board_port.c           RT-Thread ADC/GPIO 板级适配
+hardware/cooling_board_port.c + common/can/can_bus.c
        ↓
-board.h + RT-Thread BSP        STM32 引脚、通道和底层驱动
+board.h + RT-Thread BSP
 ```
 
-采样周期、滤波参数、线程栈和优先级统一放在 `applications/cooling_config.h`。业务通道定义放在 `applications/cooling_channels.h`。如果移植到另一块板，优先修改 `board.h`、`cooling_board_port.c` 和 `cooling_config.h`；ADC/开关服务及未来 CAN 代码可以保持不变。
-
-ADC 的公共数据结构和接口位于 `applications/cooling_adc.h`：
+ADC 快照直接复制，是否可用由 `valid_mask` 表示：
 
 ```c
 cooling_adc_snapshot_t adc;
 
-if (cooling_adc_get_snapshot(&adc) == RT_EOK &&
-    adc.valid_mask == COOLING_ADC_VALID_ALL)
+cooling_adc_get_snapshot(&adc);
+if (adc.valid_mask == COOLING_ADC_VALID_ALL)
 {
-    /* adc.value[COOLING_ADC_NTC0].filtered   - 滤波后的 12 位 ADC 值 */
-    /* adc.value[COOLING_ADC_NTC0].millivolts - 按 3.3 V 标称参考值换算 */
-    /* 在这里逐字段装入 CAN 数据帧，不要直接发送整个结构体。 */
+    /* adc.value[COOLING_ADC_NTC0].filtered */
+    /* adc.value[COOLING_ADC_NTC0].millivolts */
 }
 ```
 
-开关状态通过 `cooling_switch_get_snapshot()` 取得。`limit_level` 是消抖后的 PB15 电平，`limit_valid` 表示消抖结果是否已经有效，`heater_on` 是当前加热输出命令状态。
-
-串口 MSH 中可以执行 `adc_values` 查看三路 ADC 原始值、滤波值和毫伏值，执行 `io_values` 查看限位开关与加热输出状态。当前没有加入 NTC 温度曲线，因为热敏电阻型号、分压电阻和 B 值尚未确定。
+串口 MSH 可使用 `adc_values`、`tank_status`、`heater_status` 和
+`pressure_status` 查看运行状态。
 
 ## 3. 当前硬件配置
 
@@ -145,17 +148,16 @@ VTref 用于让调试器识别目标电平。是否由 ST-LINK 给板子供电�
 
 ```text
 CoolingCtrlBoard / STM32F302CCT6 / 72000000 Hz
-uart1: ready
-adc1: ready
-can1: ready
-limit switch: 0
+tank monitor: started (0)
+adc sampler: started (0)
+pressure control: started (0)
+CAN bus: started (0)
+CAN OTA: started (0)
 ```
-
-最后一行会随 PB15 的实际输入电平变化，随后可以使用 MSH 命令行。
 
 ## 6. 首次上电安全要求
 
-- PB0 是 `HTR_PWR`。当前 BSP 和示例应用只会将它保持为低电平，不会主动开启加热器。
+- PB0 是 `HTR_PWR`。上电默认保持低电平，只有全部安全条件满足时压力控制任务才允许开启。
 - 首次烧录时建议断开加热功率级或使用限流电源，确认 PB0 始终为低后再接负载。
 - PA0、PA1、PA2 的 ADC 输入电压必须处于 0 到 VDDA 范围内，不得输入 5V。
 - PA11、PA12 是 MCU 的 CAN 逻辑信号，必须通过 CAN 收发器接入 CANH/CANL，不能直接接总线。

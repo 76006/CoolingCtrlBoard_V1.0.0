@@ -99,7 +99,7 @@ CRC16 是 CCITT-FALSE：初值 `0xFFFF`，多项式 `0x1021`。文件 CRC32 与�
 ## 6. 代码分层
 
 ```text
-applications/cooling_ota.c    App 业务接入：关加热、完成后复位
+applications/ota/cooling_ota.c App 业务接入：关加热、完成后复位
 common/fota_can.c             CAN 分块协议
 common/fota_rbl.c             标准 RBL 解析和校验
 common/fota_meta.c            双页掉电状态

@@ -11,11 +11,6 @@ uint32_t fota_crc32_update(uint32_t crc, const void *data, size_t length)
     size_t index;
     unsigned int bit;
 
-    if ((bytes == NULL) && (length != 0U))
-    {
-        return crc;
-    }
-
     for (index = 0U; index < length; ++index)
     {
         crc ^= bytes[index];
@@ -48,11 +43,6 @@ uint16_t fota_crc16_ccitt(const void *data, size_t length)
     uint16_t crc = UINT16_C(0xFFFF);
     size_t index;
     unsigned int bit;
-
-    if ((bytes == NULL) && (length != 0U))
-    {
-        return 0U;
-    }
 
     for (index = 0U; index < length; ++index)
     {

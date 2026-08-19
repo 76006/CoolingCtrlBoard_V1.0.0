@@ -111,11 +111,6 @@ int fota_meta_load(fota_meta_info_t *info)
     fota_meta_record_t records[FOTA_META_PAGE_COUNT];
     uint32_t selected;
 
-    if (info == NULL)
-    {
-        return -1;
-    }
-
     memset(info, 0, sizeof(*info));
     info->state = FOTA_META_EMPTY;
     part = fota_meta_partition();
@@ -145,7 +140,7 @@ int fota_meta_load(fota_meta_info_t *info)
     return 0;
 }
 
-int fota_meta_store(const fota_meta_info_t *info)
+static int fota_meta_store(const fota_meta_info_t *info)
 {
     const struct fal_partition *part;
     fota_meta_record_t records[FOTA_META_PAGE_COUNT];
@@ -155,11 +150,6 @@ int fota_meta_store(const fota_meta_info_t *info)
     uint32_t target_page;
     uint32_t target_offset;
     uint16_t commit = FOTA_META_COMMIT;
-
-    if ((info == NULL) || !fota_meta_state_valid((uint16_t)info->state))
-    {
-        return -1;
-    }
 
     part = fota_meta_partition();
     if (part == NULL)

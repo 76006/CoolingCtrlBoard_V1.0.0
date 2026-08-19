@@ -5,7 +5,7 @@
  * 芯片 UID 使用 CMSIS 提供的 UID_BASE，12 字节密钥固定放在 Bootloader 末页页首。
  */
 
-#include "my_encry.h"
+#include "cooling_uid_auth.h"
 
 #include <string.h>
 
@@ -50,10 +50,7 @@ void my_encry_init(void)
     is_encry_ok = (UID_Encryption_Key_Check(
             (void *)COOLING_UID_KEY_START_ADDRESS,
             (void *)UID_BASE,
-            custom_id,
-            LENGTH_12,
-            BIG_ENDIA,
-            ALGORITHM_3) == 0) ? 1U : 0U;
+            custom_id) == 0) ? 1U : 0U;
 #else
     is_encry_ok = 1U;
 #endif

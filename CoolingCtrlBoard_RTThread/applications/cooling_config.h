@@ -10,6 +10,8 @@
 #ifndef APPLICATIONS_COOLING_CONFIG_H
 #define APPLICATIONS_COOLING_CONFIG_H
 
+#include "adc/cooling_adc_channels.h"
+
 /* ADC 电气参数。当前毫伏值按 3.3 V 标称参考电压计算。 */
 #define COOLING_ADC_REFERENCE_MV               3300U
 #define COOLING_ADC_FULL_SCALE                 4095U
@@ -34,11 +36,18 @@
 #define COOLING_TANK_THREAD_PRIORITY           14U
 #define COOLING_TANK_THREAD_TIMESLICE          10U
 
+/* 传感器标定与物理量换算。没有实测标定数据时开关保持为 0。 */
+#define COOLING_TEMPERATURE_ADC_INPUT            COOLING_ADC_NTC0
+#define COOLING_PRESSURE_CALIBRATED               0U
+#define COOLING_TEMPERATURE_CALIBRATED            0U
+#define COOLING_PRESSURE_ADC_FULL_MPA1000         0U
+#define COOLING_PRESSURE_ADC_OFFSET_MPA1000       0U
+#define COOLING_TEMPERATURE_ADC_FULL_DEG10        0U
+#define COOLING_TEMPERATURE_ADC_OFFSET_DEG10      0U
+
 /* ---------------------------------------------------------------------
  * 冷媒压力加热控制配置（方案 A：GPIO 软件 PWM + 分阶段加热控制）
  * --------------------------------------------------------------------- */
-
-/* 压力标定状态与物理量换算参数统一放在 cooling_sensor_config.h。 */
 
 /* 控制周期与软件 PWM 窗口。窗口必须是控制周期的整数倍。 */
 #define COOLING_PRESSURE_CONTROL_PERIOD_MS      50U
@@ -73,67 +82,5 @@
 #define COOLING_PRESSURE_THREAD_STACK_SIZE      1024U
 #define COOLING_PRESSURE_THREAD_PRIORITY        13U
 #define COOLING_PRESSURE_THREAD_TIMESLICE       10U
-
-#if (COOLING_ADC_FILTER_WINDOW < 3U) || ((COOLING_ADC_FILTER_WINDOW % 2U) == 0U)
-#error "COOLING_ADC_FILTER_WINDOW must be an odd number >= 3"
-#endif
-
-#if (COOLING_ADC_IIR_DIVISOR <= 0) || (COOLING_ADC_IIR_SCALE <= 0)
-#error "ADC IIR parameters must be positive"
-#endif
-
-#if (COOLING_TANK_DEBOUNCE_SAMPLES == 0U)
-#error "COOLING_TANK_DEBOUNCE_SAMPLES must be positive"
-#endif
-
-#if (COOLING_PRESSURE_CONTROL_PERIOD_MS == 0U) || \
-    (COOLING_PRESSURE_PWM_WINDOW_MS == 0U)
-#error "pressure control period and PWM window must be positive"
-#endif
-
-#if ((COOLING_PRESSURE_PWM_WINDOW_MS % COOLING_PRESSURE_CONTROL_PERIOD_MS) != 0U)
-#error "COOLING_PRESSURE_PWM_WINDOW_MS must be a multiple of COOLING_PRESSURE_CONTROL_PERIOD_MS"
-#endif
-
-#if (COOLING_PRESSURE_BOOST_DUTY_PERCENT > 100U) || \
-    (COOLING_PRESSURE_MAINTAIN_DUTY_PERCENT > 100U)
-#error "pressure duty percent must be within 0..100"
-#endif
-
-#if (COOLING_PRESSURE_TARGET_ADC == 0U) || \
-    (COOLING_PRESSURE_TARGET_ADC > COOLING_ADC_FULL_SCALE)
-#error "COOLING_PRESSURE_TARGET_ADC is a placeholder; set it within 1..full scale after calibration"
-#endif
-
-#if (COOLING_PRESSURE_HYSTERESIS_DOWN_ADC > COOLING_PRESSURE_TARGET_ADC)
-#error "COOLING_PRESSURE_HYSTERESIS_DOWN_ADC must not exceed COOLING_PRESSURE_TARGET_ADC"
-#endif
-
-#if ((COOLING_PRESSURE_TARGET_ADC + COOLING_PRESSURE_HYSTERESIS_UP_ADC) > \
-     COOLING_ADC_FULL_SCALE)
-#error "target ADC plus upper hysteresis must fit within ADC full scale"
-#endif
-
-#if (COOLING_PRESSURE_CONFIRM_TIME_MS == 0U) || \
-    (COOLING_PRESSURE_CONFIRM_TIME_MS > COOLING_PRESSURE_MAX_BOOST_TIME_MS)
-#error "confirm time must be positive and not exceed max boost time"
-#endif
-
-#if (COOLING_PRESSURE_MAX_BOOST_TIME_MS == 0U)
-#error "COOLING_PRESSURE_MAX_BOOST_TIME_MS must be positive"
-#endif
-
-#if (COOLING_PRESSURE_ADC_MAX_AGE_MS == 0U)
-#error "COOLING_PRESSURE_ADC_MAX_AGE_MS must be positive"
-#endif
-
-#if (COOLING_PRESSURE_ADC_MIN_FILTERED >= COOLING_PRESSURE_ADC_MAX_FILTERED) || \
-    (COOLING_PRESSURE_ADC_MAX_FILTERED > COOLING_ADC_FULL_SCALE)
-#error "invalid pressure ADC plausibility range"
-#endif
-
-#if (COOLING_PRESSURE_THREAD_STACK_SIZE == 0U)
-#error "pressure thread stack size must be positive"
-#endif
 
 #endif /* APPLICATIONS_COOLING_CONFIG_H */

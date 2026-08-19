@@ -8,12 +8,15 @@ common_root = os.path.abspath(os.path.join(cwd, '..', 'common'))
 # 但不再要求每个模块各自携带一份 SConscript。
 module_dirs = [
     '',
+    'hardware',
+    'adc',
     'can',
+    'ota',
     'heater',
     'pressure',
     'safety',
     'tank',
-    'uid_encry',
+    'uid',
 ]
 
 src = []

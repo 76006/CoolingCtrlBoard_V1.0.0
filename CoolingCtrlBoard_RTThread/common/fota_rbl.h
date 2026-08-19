@@ -34,14 +34,13 @@ typedef struct
 typedef enum
 {
     FOTA_RBL_OK = 0,
-    FOTA_RBL_ERROR_ARGUMENT = -1,
-    FOTA_RBL_ERROR_READ = -2,
-    FOTA_RBL_ERROR_HEADER_CRC = -3,
-    FOTA_RBL_ERROR_MAGIC = -4,
-    FOTA_RBL_ERROR_ALGORITHM = -5,
-    FOTA_RBL_ERROR_PARTITION = -6,
-    FOTA_RBL_ERROR_SIZE = -7,
-    FOTA_RBL_ERROR_BODY_CRC = -8
+    FOTA_RBL_ERROR_READ = -1,
+    FOTA_RBL_ERROR_HEADER_CRC = -2,
+    FOTA_RBL_ERROR_MAGIC = -3,
+    FOTA_RBL_ERROR_ALGORITHM = -4,
+    FOTA_RBL_ERROR_PARTITION = -5,
+    FOTA_RBL_ERROR_SIZE = -6,
+    FOTA_RBL_ERROR_BODY_CRC = -7
 } fota_rbl_result_t;
 
 typedef int (*fota_rbl_read_fn)(void *context,
@@ -49,22 +48,10 @@ typedef int (*fota_rbl_read_fn)(void *context,
                                 uint8_t *buffer,
                                 size_t size);
 
-fota_rbl_result_t fota_rbl_read_and_validate_header(fota_rbl_read_fn read_fn,
-                                                     void *context,
-                                                     uint32_t source_capacity,
-                                                     uint32_t app_capacity,
-                                                     fota_rbl_header_t *header);
-
-fota_rbl_result_t fota_rbl_verify_body(fota_rbl_read_fn read_fn,
-                                        void *context,
-                                        const fota_rbl_header_t *header);
-
 fota_rbl_result_t fota_rbl_verify(fota_rbl_read_fn read_fn,
                                    void *context,
                                    uint32_t source_capacity,
                                    uint32_t app_capacity,
                                    fota_rbl_header_t *header);
-
-uint32_t fota_rbl_total_size(const fota_rbl_header_t *header);
 
 #endif /* FOTA_RBL_H */

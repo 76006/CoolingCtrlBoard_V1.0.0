@@ -14,7 +14,7 @@
 #include <drv_common.h>
 
 #include "cooling_flash_layout.h"
-#include "uid_encry/my_encry.h"
+#include "uid/cooling_uid_auth.h"
 
 #ifdef RT_USING_PIN
 #include <drv_gpio.h>

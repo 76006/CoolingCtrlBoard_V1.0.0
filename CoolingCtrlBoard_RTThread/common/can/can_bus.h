@@ -1,76 +1,42 @@
-/*
- * CoolingCtrlBoard 统一 CAN 总线管理接口
- *
- * 定义总线启动参数、软件过滤器、接收订阅回调、统一发送接口和统计
- * 快照。业务模块只订阅自己关心的报文，不能各自重复打开 CAN 设备。
- */
+/* CoolingCtrlBoard 固定 CAN 总线接口。 */
 
 #ifndef COOLING_CAN_BUS_H
 #define COOLING_CAN_BUS_H
 
 #include <stdint.h>
 
-#include "can_frame.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define CAN_BUS_FORMAT_STANDARD_MASK    (1U << CAN_FRAME_FORMAT_STANDARD)
-#define CAN_BUS_FORMAT_EXTENDED_MASK    (1U << CAN_FRAME_FORMAT_EXTENDED)
-#define CAN_BUS_FORMAT_ANY_MASK         (CAN_BUS_FORMAT_STANDARD_MASK | \
-                                         CAN_BUS_FORMAT_EXTENDED_MASK)
+#define CAN_FRAME_DATA_SIZE 8U
 
-#define CAN_BUS_TYPE_DATA_MASK          (1U << CAN_FRAME_TYPE_DATA)
-#define CAN_BUS_TYPE_REMOTE_MASK        (1U << CAN_FRAME_TYPE_REMOTE)
-#define CAN_BUS_TYPE_ANY_MASK           (CAN_BUS_TYPE_DATA_MASK | \
-                                         CAN_BUS_TYPE_REMOTE_MASK)
-
-typedef struct
+typedef enum
 {
-    const char *device_name;
-    uint32_t baud_rate;
-    uint16_t rx_thread_stack_size;
-    uint8_t rx_thread_priority;
-    uint8_t rx_thread_timeslice;
-} can_bus_config_t;
+    CAN_FRAME_FORMAT_STANDARD = 0,
+    CAN_FRAME_FORMAT_EXTENDED = 1
+} can_frame_format_t;
+
+typedef enum
+{
+    CAN_FRAME_TYPE_DATA = 0,
+    CAN_FRAME_TYPE_REMOTE = 1
+} can_frame_type_t;
 
 typedef struct
 {
     uint32_t id;
-    uint32_t id_mask;
-    uint8_t format_mask;
-    uint8_t type_mask;
-} can_bus_filter_t;
+    uint8_t format;
+    uint8_t type;
+    uint8_t dlc;
+    uint8_t data[CAN_FRAME_DATA_SIZE];
+} can_frame_t;
 
-typedef enum
-{
-    CAN_BUS_RX_PASS = 0,
-    CAN_BUS_RX_CONSUMED = 1
-} can_bus_rx_result_t;
+typedef void (*can_bus_rx_handler_t)(const can_frame_t *frame);
 
-typedef can_bus_rx_result_t (*can_bus_rx_handler_t)(const can_frame_t *frame,
-                                                    void *context);
-
-typedef struct
-{
-    uint32_t rx_frames;
-    uint32_t rx_unhandled;
-    uint32_t rx_errors;
-    uint32_t tx_frames;
-    uint32_t tx_errors;
-} can_bus_stats_t;
-
-int can_bus_start(const can_bus_config_t *config);
-int can_bus_is_started(void);
-
-/* 订阅项在启动阶段注册，运行期间不删除，避免出现悬空回调。 */
-int can_bus_subscribe(const can_bus_filter_t *filter,
-                      can_bus_rx_handler_t handler,
-                      void *context);
-
+/* 固定启动 can1：500 kbit/s，接收线程栈 2048、优先级 18。 */
+int can_bus_start(can_bus_rx_handler_t handler);
 int can_bus_send(const can_frame_t *frame);
-void can_bus_get_stats(can_bus_stats_t *stats);
 
 #ifdef __cplusplus
 }

@@ -7,22 +7,28 @@ cwd = GetCurrentDir()
 root = os.path.abspath(os.path.join(cwd, '..'))
 env.Append(CPPDEFINES=[rtconfig.MCU, 'COOLING_BOOTLOADER_BUILD'])
 
-src = [
+# Bootloader 自身源码由当前 SConscript 的 VariantDir 统一放入 build。
+local_src = [
     'main.c',
     'boot_fota.c',
     'uid_key_slot.c',
-    os.path.join(root, 'board', 'board.c'),
-    os.path.join(root, 'board', 'CubeMX_Config', 'Src', 'stm32f3xx_hal_msp.c'),
-    os.path.join(root, 'common', 'fal_flash_f302.c'),
-    os.path.join(root, 'common', 'fota_crc.c'),
-    os.path.join(root, 'common', 'fota_rbl.c'),
-    os.path.join(root, 'common', 'fota_meta.c'),
-    os.path.join(root, 'common', 'fota_storage.c'),
-    os.path.join(root, 'common', 'fota_can.c'),
-    os.path.join(root, 'common', 'can', 'can_port_rtthread.c'),
-    os.path.join(root, 'common', 'can', 'can_bus.c'),
-    os.path.join(root, 'applications', 'uid_encry', 'my_encry.c'),
-    os.path.join(root, 'applications', 'uid_encry', 'UID_Encryption.c'),
+]
+
+# 复用 App/公共层源码时不能把绝对 .c 路径直接交给 DefineGroup，
+# 否则 SCons 会把 .o 写回源码旁。这里保留相对目录结构，并把所有
+# 中间目标显式放到 bootloader/build/external 下。
+external_src = [
+    os.path.join('board', 'board.c'),
+    os.path.join('board', 'CubeMX_Config', 'Src', 'stm32f3xx_hal_msp.c'),
+    os.path.join('common', 'fal_flash_f302.c'),
+    os.path.join('common', 'fota_crc.c'),
+    os.path.join('common', 'fota_rbl.c'),
+    os.path.join('common', 'fota_meta.c'),
+    os.path.join('common', 'fota_storage.c'),
+    os.path.join('common', 'fota_can.c'),
+    os.path.join('common', 'can', 'can_bus.c'),
+    os.path.join('applications', 'uid', 'cooling_uid_auth.c'),
+    os.path.join('applications', 'uid', 'UID_Encryption.c'),
 ]
 
 path = [
@@ -32,10 +38,16 @@ path = [
     os.path.join(root, 'common'),
     os.path.join(root, 'common', 'can'),
     os.path.join(root, 'applications'),
-    os.path.join(root, 'applications', 'uid_encry'),
+    os.path.join(root, 'applications', 'uid'),
 ]
 
-group = DefineGroup('CoolingBootloader', src, depend=[''], CPPPATH=path)
+group = DefineGroup('CoolingBootloader', local_src, depend=[''], CPPPATH=path)
+
+for relative_source in external_src:
+    source = os.path.join(root, relative_source)
+    target_without_suffix = os.path.splitext(relative_source)[0]
+    target = os.path.join(cwd, 'build', 'external', target_without_suffix)
+    group = group + env.Object(target=target, source=source)
 
 # 各软件包显式映射到 Bootloader 自己的 build 目录，不能复用 App 的 .o。
 for package_name in [

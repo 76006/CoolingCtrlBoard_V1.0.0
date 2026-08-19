@@ -3,7 +3,7 @@
  *
  * 实现早期标准帧控制/数据协议，支持开始、分块、结束、终止和查询，
  * 将接收的 RBL 写入 download 分区并完成 CRC/RBL 校验。当前 App 使用
- * applications/cooling_ota.c 的扩展帧协议，本文件主要供 Bootloader
+ * applications/ota/cooling_ota.c 的扩展帧协议，本文件主要供 Bootloader
  * 恢复窗口使用，二者共用底层 CAN 总线和 FOTA 存储模块。
  */
 
@@ -15,7 +15,6 @@
 #include <rtthread.h>
 
 #include "can/can_bus.h"
-#include "can/can_frame.h"
 #include "cooling_flash_layout.h"
 #include "fota_crc.h"
 #include "fota_meta.h"
@@ -50,7 +49,6 @@ typedef struct
     uint16_t block_length;
     uint16_t block_received;
     uint16_t block_crc;
-    volatile uint8_t started;
     volatile uint8_t activity;
     volatile uint8_t receiving; /* CAN 线程写、加热控制线程读的跨线程标志 */
     uint8_t block_open;
@@ -135,19 +133,9 @@ static void fota_can_handle_begin(const can_frame_t *message)
         return;
     }
 
-    /*
-     * 合法 BEGIN 后、调用 prepare 之前就置“接收中”：加热控制任务
-     * 看到 busy 会立即关闭加热，保证软件 PWM 绝不会在 prepare 或
-     * Flash 擦除期间重新开启加热。
-     */
-    g_fota_can.receiving = 1U;
-    if (g_fota_can.config.prepare != RT_NULL)
-    {
-        g_fota_can.config.prepare();
-    }
-
     fota_can_reset_transfer();
-    g_fota_can.receiving = 1U; /* reset_transfer 清零了标志，重新置位 */
+    g_fota_can.receiving = 1U;
+    g_fota_can.config.prepare();
     if (fota_meta_set(FOTA_META_DOWNLOADING, file_size, 0U, 0U, 0U) != 0)
     {
         g_fota_can.receiving = 0U; /* 元数据写入失败，恢复非接收状态 */
@@ -344,10 +332,7 @@ static void fota_can_handle_end(const can_frame_t *message)
     fota_can_respond(FOTA_CAN_OP_END, FOTA_CAN_STATUS_OK,
                      g_fota_can.next_block, header.code_crc);
     rt_thread_mdelay(50U);
-    if (g_fota_can.config.completed != RT_NULL)
-    {
-        g_fota_can.config.completed();
-    }
+    g_fota_can.config.completed();
 }
 
 static void fota_can_handle_control(const can_frame_t *message)
@@ -393,50 +378,28 @@ static void fota_can_handle_control(const can_frame_t *message)
     }
 }
 
-static can_bus_rx_result_t fota_can_receive(const can_frame_t *message,
-                                            void *context)
+static void fota_can_receive(const can_frame_t *message)
 {
-    (void)context;
     if ((message->format != CAN_FRAME_FORMAT_STANDARD) ||
         (message->type != CAN_FRAME_TYPE_DATA))
     {
-        return CAN_BUS_RX_PASS;
+        return;
     }
 
     if (message->id == g_fota_can.config.control_id)
     {
         g_fota_can.activity = 1U;
         fota_can_handle_control(message);
-        return CAN_BUS_RX_CONSUMED;
     }
-    if (message->id == g_fota_can.config.data_id)
+    else if (message->id == g_fota_can.config.data_id)
     {
         g_fota_can.activity = 1U;
         fota_can_handle_data(message);
-        return CAN_BUS_RX_CONSUMED;
     }
-    return CAN_BUS_RX_PASS;
 }
 
 int fota_can_start(const fota_can_config_t *config)
 {
-    static const can_bus_filter_t filter =
-    {
-        0U,
-        0U,
-        CAN_BUS_FORMAT_STANDARD_MASK,
-        CAN_BUS_TYPE_DATA_MASK
-    };
-
-    if ((config == NULL) || !can_bus_is_started() ||
-        (config->control_id > CAN_FRAME_STD_ID_MAX) ||
-        (config->data_id > CAN_FRAME_STD_ID_MAX) ||
-        (config->response_id > CAN_FRAME_STD_ID_MAX) ||
-        g_fota_can.started)
-    {
-        return -1;
-    }
-
     memset(&g_fota_can, 0, sizeof(g_fota_can));
     g_fota_can.config = *config;
     if (fal_init() < 0)
@@ -450,12 +413,7 @@ int fota_can_start(const fota_can_config_t *config)
     }
 
     fota_can_reset_transfer();
-    if (can_bus_subscribe(&filter, fota_can_receive, RT_NULL) != 0)
-    {
-        return -1;
-    }
-    g_fota_can.started = 1U;
-    return 0;
+    return can_bus_start(fota_can_receive);
 }
 
 int fota_can_activity_seen(void)

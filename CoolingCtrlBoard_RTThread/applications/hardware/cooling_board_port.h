@@ -17,7 +17,7 @@
 
 #include <rtthread.h>
 
-#include "cooling_channels.h"
+#include "adc/cooling_adc_channels.h"
 
 /* 初始化/释放板上的 ADC 设备。ADC 由采样任务单线程使用。 */
 rt_err_t cooling_board_adc_init(void);

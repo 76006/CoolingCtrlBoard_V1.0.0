@@ -12,13 +12,12 @@
 
 #include "cooling_tank.h"
 
-#include "cooling_board_port.h"
+#include "hardware/cooling_board_port.h"
 #include "cooling_config.h"
 #include "heater/cooling_heater.h"
 #include "safety/cooling_safety.h"
 
-static rt_thread_t tank_thread;
-static rt_mutex_t tank_lock;
+static struct rt_mutex tank_lock;
 static cooling_tank_snapshot_t tank_snapshot;
 
 /*
@@ -54,40 +53,38 @@ static void tank_monitor_entry(void *parameter)
             candidate_count = 1U;
         }
 
-        if (rt_mutex_take(tank_lock, RT_WAITING_FOREVER) == RT_EOK)
+        rt_mutex_take(&tank_lock, RT_WAITING_FOREVER);
+        tank_snapshot.raw_level = raw_level;
+
+        if (candidate_count >= COOLING_TANK_DEBOUNCE_SAMPLES)
         {
-            tank_snapshot.raw_level = raw_level;
-
-            if (candidate_count >= COOLING_TANK_DEBOUNCE_SAMPLES)
+            if (!tank_snapshot.valid)
             {
-                if (!tank_snapshot.valid)
-                {
-                    /* 首次达到稳定条件，只建立初值，不计为一次变化。 */
-                    tank_snapshot.stable_level = candidate_level;
-                    tank_snapshot.valid = RT_TRUE;
-                    first_stable = RT_TRUE;
-                }
-                else if (tank_snapshot.stable_level != candidate_level)
-                {
-                    tank_snapshot.stable_level = candidate_level;
-                    tank_snapshot.change_count++;
-                    state_changed = RT_TRUE;
-                }
+                /* 首次达到稳定条件，只建立初值，不计为一次变化。 */
+                tank_snapshot.stable_level = candidate_level;
+                tank_snapshot.valid = RT_TRUE;
+                first_stable = RT_TRUE;
             }
-
-            /* LS 为 10k 上拉：稳定低电平表示已插罐。 */
-            present = tank_snapshot.valid &&
-                      (tank_snapshot.stable_level == 0U);
-            tank_snapshot.tank_present = present;
-            tank_snapshot.sequence++;
-            tank_snapshot.tick = rt_tick_get();
-            rt_mutex_release(tank_lock);
+            else if (tank_snapshot.stable_level != candidate_level)
+            {
+                tank_snapshot.stable_level = candidate_level;
+                tank_snapshot.change_count++;
+                state_changed = RT_TRUE;
+            }
         }
+
+        /* LS 为 10k 上拉：稳定低电平表示已插罐。 */
+        present = tank_snapshot.valid &&
+                  (tank_snapshot.stable_level == 0U);
+        tank_snapshot.tank_present = present;
+        tank_snapshot.sequence++;
+        tank_snapshot.tick = rt_tick_get();
+        rt_mutex_release(&tank_lock);
 
         if (first_stable || state_changed)
         {
             /* 先向安全模块发布罐体状态；此处不持有 tank_lock。 */
-            (void)cooling_safety_set_tank(present);
+            cooling_safety_set_tank(present);
 
             /*
              * 存在 -> 不存在：更新安全状态后立即关闭加热输出，
@@ -106,73 +103,41 @@ static void tank_monitor_entry(void *parameter)
 
 rt_err_t cooling_tank_start(void)
 {
+    rt_thread_t thread;
     rt_err_t result;
-
-    if (tank_thread != RT_NULL)
-    {
-        return RT_EOK;
-    }
 
     /* 板级适配层负责 LS 引脚输入模式配置。 */
     cooling_board_tank_input_init();
 
-    tank_lock = rt_mutex_create("tanklock", RT_IPC_FLAG_PRIO);
-    if (tank_lock == RT_NULL)
-    {
-        return -RT_ENOMEM;
-    }
-
+    rt_mutex_init(&tank_lock, "tanklock", RT_IPC_FLAG_PRIO);
     rt_memset(&tank_snapshot, 0, sizeof(tank_snapshot));
     tank_snapshot.raw_level = cooling_board_tank_read();
     tank_snapshot.tick = rt_tick_get();
 
-    tank_thread = rt_thread_create("tankmon",
-                                   tank_monitor_entry,
-                                   RT_NULL,
-                                   COOLING_TANK_THREAD_STACK_SIZE,
-                                   COOLING_TANK_THREAD_PRIORITY,
-                                   COOLING_TANK_THREAD_TIMESLICE);
-    if (tank_thread == RT_NULL)
+    thread = rt_thread_create("tankmon", tank_monitor_entry, RT_NULL,
+                              COOLING_TANK_THREAD_STACK_SIZE,
+                              COOLING_TANK_THREAD_PRIORITY,
+                              COOLING_TANK_THREAD_TIMESLICE);
+    if (thread == RT_NULL)
     {
-        rt_mutex_delete(tank_lock);
-        tank_lock = RT_NULL;
         return -RT_ENOMEM;
     }
 
-    result = rt_thread_startup(tank_thread);
+    result = rt_thread_startup(thread);
     if (result != RT_EOK)
     {
-        rt_thread_delete(tank_thread);
-        tank_thread = RT_NULL;
-        rt_mutex_delete(tank_lock);
-        tank_lock = RT_NULL;
+        rt_thread_delete(thread);
         return result;
     }
 
     return RT_EOK;
 }
 
-rt_err_t cooling_tank_get_snapshot(cooling_tank_snapshot_t *snapshot)
+void cooling_tank_get_snapshot(cooling_tank_snapshot_t *snapshot)
 {
-    rt_err_t result;
-
-    if (snapshot == RT_NULL)
-    {
-        return -RT_EINVAL;
-    }
-    if (tank_lock == RT_NULL)
-    {
-        return -RT_ENOSYS;
-    }
-
-    result = rt_mutex_take(tank_lock, RT_WAITING_FOREVER);
-    if (result == RT_EOK)
-    {
-        *snapshot = tank_snapshot;
-        rt_mutex_release(tank_lock);
-    }
-
-    return result;
+    rt_mutex_take(&tank_lock, RT_WAITING_FOREVER);
+    *snapshot = tank_snapshot;
+    rt_mutex_release(&tank_lock);
 }
 
 #ifdef RT_USING_FINSH
@@ -184,11 +149,7 @@ static void tank_status(int argc, char **argv)
     (void)argc;
     (void)argv;
 
-    if (cooling_tank_get_snapshot(&snapshot) != RT_EOK)
-    {
-        rt_kprintf("tank monitor is not ready\n");
-        return;
-    }
+    cooling_tank_get_snapshot(&snapshot);
 
     rt_kprintf("tank seq=%u tick=%u raw=%u stable=%u valid=%u "
                "present=%s changes=%u\n",

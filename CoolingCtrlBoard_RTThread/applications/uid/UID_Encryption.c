@@ -1,5 +1,5 @@
 /*
- * 正点原子脱机下载器 UID 自定义加密算法的精简移植。
+ * 正点原子脱机下载器 UID 自定义加密算法的精简移植实现。
  *
  * 根据 STM32 的 96 位 UID 和固定算法生成期望密钥，再与 Bootloader
  * 密钥槽中的 12 字节内容比较。本产品只保留下载器 V1.2 的算法 3、
@@ -8,22 +8,9 @@
 
 #include "UID_Encryption.h"
 
-#include <stddef.h>
 #include <string.h>
 
 #define UID_ENCRY_KEY_SIZE 12U
-
-static int uid_encry_parameters_valid(const void *key,
-                                      const void *uid,
-                                      const void *custom_id,
-                                      eKeyLengthType key_length,
-                                      eEndiaType endian,
-                                      eAlgorithmType algorithm)
-{
-    return (key != NULL) && (uid != NULL) && (custom_id != NULL) &&
-           (key_length == LENGTH_12) && (endian == BIG_ENDIA) &&
-           (algorithm == ALGORITHM_3);
-}
 
 static void uid_encry_algorithm_3(const uint8_t custom_id[UID_ENCRY_KEY_SIZE],
                                   const uint8_t uid[UID_ENCRY_KEY_SIZE],
@@ -71,41 +58,14 @@ static void uid_encry_calculate_fixed(uint8_t key[UID_ENCRY_KEY_SIZE],
     uid_encry_to_big_endian(key);
 }
 
-char UID_Encryption_Key_Check(void *pKey,
-                              void *pUID,
-                              void *pCustomID,
-                              eKeyLengthType keyLength,
-                              eEndiaType endiaType,
-                              eAlgorithmType algorithmNum)
+char UID_Encryption_Key_Check(const void *key,
+                              const void *uid,
+                              const void *custom_id)
 {
     uint8_t calculated_key[UID_ENCRY_KEY_SIZE];
 
-    if (!uid_encry_parameters_valid(pKey, pUID, pCustomID, keyLength,
-                                    endiaType, algorithmNum))
-    {
-        return 1;
-    }
-
     uid_encry_calculate_fixed(calculated_key,
-                              (const uint8_t *)pUID,
-                              (const uint8_t *)pCustomID);
-    return memcmp(pKey, calculated_key, sizeof(calculated_key)) == 0 ? 0 : 1;
-}
-
-void UID_Encryption_Key_Calculate(void *pKey,
-                                  void *pUID,
-                                  void *pCustomID,
-                                  eKeyLengthType keyLength,
-                                  eEndiaType endiaType,
-                                  eAlgorithmType algorithmNum)
-{
-    if (!uid_encry_parameters_valid(pKey, pUID, pCustomID, keyLength,
-                                    endiaType, algorithmNum))
-    {
-        return;
-    }
-
-    uid_encry_calculate_fixed((uint8_t *)pKey,
-                              (const uint8_t *)pUID,
-                              (const uint8_t *)pCustomID);
+                              (const uint8_t *)uid,
+                              (const uint8_t *)custom_id);
+    return memcmp(key, calculated_key, sizeof(calculated_key)) == 0 ? 0 : 1;
 }

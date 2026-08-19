@@ -24,30 +24,14 @@ static int fota_rbl_part_name_is_app(const char name[FOTA_RBL_PART_NAME_SIZE])
            (name[expected_length] == '\0');
 }
 
-uint32_t fota_rbl_total_size(const fota_rbl_header_t *header)
-{
-    if ((header == NULL) ||
-        (header->package_size > (UINT32_MAX - FOTA_RBL_HEADER_SIZE)))
-    {
-        return 0U;
-    }
-
-    return FOTA_RBL_HEADER_SIZE + header->package_size;
-}
-
-fota_rbl_result_t fota_rbl_read_and_validate_header(fota_rbl_read_fn read_fn,
-                                                     void *context,
-                                                     uint32_t source_capacity,
-                                                     uint32_t app_capacity,
-                                                     fota_rbl_header_t *header)
+static fota_rbl_result_t fota_rbl_read_and_validate_header(
+        fota_rbl_read_fn read_fn,
+        void *context,
+        uint32_t source_capacity,
+        uint32_t app_capacity,
+        fota_rbl_header_t *header)
 {
     uint32_t calculated_crc;
-    uint32_t total_size;
-
-    if ((read_fn == NULL) || (header == NULL))
-    {
-        return FOTA_RBL_ERROR_ARGUMENT;
-    }
 
     if (read_fn(context, 0U, (uint8_t *)header, sizeof(*header)) !=
         (int)sizeof(*header))
@@ -77,11 +61,10 @@ fota_rbl_result_t fota_rbl_read_and_validate_header(fota_rbl_read_fn read_fn,
         return FOTA_RBL_ERROR_PARTITION;
     }
 
-    total_size = fota_rbl_total_size(header);
     if ((header->raw_size == 0U) ||
         (header->raw_size > app_capacity) ||
         (header->package_size != header->raw_size) ||
-        (total_size == 0U) || (total_size != source_capacity))
+        (header->package_size != (source_capacity - FOTA_RBL_HEADER_SIZE)))
     {
         return FOTA_RBL_ERROR_SIZE;
     }
@@ -89,18 +72,14 @@ fota_rbl_result_t fota_rbl_read_and_validate_header(fota_rbl_read_fn read_fn,
     return FOTA_RBL_OK;
 }
 
-fota_rbl_result_t fota_rbl_verify_body(fota_rbl_read_fn read_fn,
-                                        void *context,
-                                        const fota_rbl_header_t *header)
+static fota_rbl_result_t fota_rbl_verify_body(
+        fota_rbl_read_fn read_fn,
+        void *context,
+        const fota_rbl_header_t *header)
 {
     uint8_t buffer[256];
     uint32_t crc = FOTA_CRC32_INITIAL_VALUE;
     uint32_t position = 0U;
-
-    if ((read_fn == NULL) || (header == NULL))
-    {
-        return FOTA_RBL_ERROR_ARGUMENT;
-    }
 
     while (position < header->package_size)
     {

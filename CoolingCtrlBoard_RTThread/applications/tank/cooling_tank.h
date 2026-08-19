@@ -29,11 +29,11 @@ typedef struct
     rt_bool_t tank_present;      /* 稳定低电平 = 已插罐 */
 } cooling_tank_snapshot_t;
 
-/* 启动 LS 监测任务；重复调用幂等。 */
+/* 启动 LS 监测任务。 */
 rt_err_t cooling_tank_start(void);
 
 /* 复制一份线程安全的罐体快照；不能在中断中调用。 */
-rt_err_t cooling_tank_get_snapshot(cooling_tank_snapshot_t *snapshot);
+void cooling_tank_get_snapshot(cooling_tank_snapshot_t *snapshot);
 
 #ifdef __cplusplus
 }

@@ -33,26 +33,26 @@ typedef struct
 } cooling_safety_snapshot_t;
 
 /*
- * 初始化安全模块。重复调用幂等；默认失败关闭：
+ * 初始化安全模块。默认失败关闭：
  * authorized/power_on/tank_present/ota_busy 均为 false，
  * auto_control_enabled 为 true，calibrated 取 COOLING_PRESSURE_CALIBRATED。
  */
-rt_err_t cooling_safety_init(void);
+void cooling_safety_init(void);
 
 /* 复制一份线程安全的安全快照；不能在中断中调用。 */
-rt_err_t cooling_safety_get_snapshot(cooling_safety_snapshot_t *snapshot);
+void cooling_safety_get_snapshot(cooling_safety_snapshot_t *snapshot);
 
 /* 各状态生产者发布自己负责的字段；不能在中断中调用。 */
-rt_err_t cooling_safety_set_authorized(rt_bool_t authorized);
-rt_err_t cooling_safety_set_power(rt_bool_t power_on);
-rt_err_t cooling_safety_set_auto_control(rt_bool_t enabled);
-rt_err_t cooling_safety_set_tank(rt_bool_t tank_present);
-rt_err_t cooling_safety_set_ota(rt_bool_t busy);
+void cooling_safety_set_authorized(rt_bool_t authorized);
+void cooling_safety_set_power(rt_bool_t power_on);
+void cooling_safety_set_auto_control(rt_bool_t enabled);
+void cooling_safety_set_tank(rt_bool_t tank_present);
+void cooling_safety_set_ota(rt_bool_t busy);
 
 /*
  * 统一加热允许判定：authorized && calibrated && power_on &&
  * auto_control_enabled && tank_present && !ota_busy 时返回真；
- * 未初始化或读取失败一律返回假（失败关闭）。
+ * 该快照由各状态生产者实时更新。
  */
 rt_bool_t cooling_safety_heater_allowed(void);
 

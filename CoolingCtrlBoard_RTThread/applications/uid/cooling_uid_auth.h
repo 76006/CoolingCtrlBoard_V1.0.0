@@ -6,8 +6,8 @@
  * 本文件不包含具体加密算法，算法实现在 UID_Encryption.c。
  */
 
-#ifndef APPLICATIONS_UID_ENCRY_MY_ENCRY_H
-#define APPLICATIONS_UID_ENCRY_MY_ENCRY_H
+#ifndef APPLICATIONS_UID_COOLING_UID_AUTH_H
+#define APPLICATIONS_UID_COOLING_UID_AUTH_H
 
 #include <stdint.h>
 
@@ -23,11 +23,11 @@ extern "C" {
 /* 0 表示密钥无效，1 表示密钥与本机 UID 匹配。 */
 extern uint8_t is_encry_ok;
 
-/* 读取 Bootloader 密钥槽并完成 UID 校验。重复调用不会改变校验结果。 */
+/* 读取 Bootloader 密钥槽并完成 UID 校验。 */
 void my_encry_init(void);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* APPLICATIONS_UID_ENCRY_MY_ENCRY_H */
+#endif /* APPLICATIONS_UID_COOLING_UID_AUTH_H */
