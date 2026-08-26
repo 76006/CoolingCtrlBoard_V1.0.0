@@ -50,7 +50,10 @@ void cooling_adc_get_snapshot(cooling_adc_snapshot_t *snapshot);
 int cooling_sensor_pressure_mpa1000(uint16_t filtered_adc,
                                     uint16_t *pressure_mpa1000);
 
-/* 读取温度通道并换算为 0.1 摄氏度；无效或未标定时返回 -1。 */
+/* 按 NTC1 厂家温阻表换算为有符号 0.1 摄氏度；供温度控制使用。 */
+int cooling_sensor_ntc1_temperature_deg10(int16_t *temperature_deg10);
+
+/* 按 NTC1 厂家温阻表换算为 0.1 摄氏度；供 CAN 温度字段使用。 */
 int cooling_sensor_temperature_deg10(uint16_t *temperature_deg10);
 
 #ifdef __cplusplus

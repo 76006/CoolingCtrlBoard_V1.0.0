@@ -13,11 +13,25 @@
 
 #include "cooling_heater.h"
 
+#include "cooling_config.h"
 #include "hardware/cooling_board_port.h"
 #include "safety/cooling_safety.h"
 
 static struct rt_mutex heater_lock;
 static cooling_heater_snapshot_t heater_snapshot;
+
+#ifdef RT_USING_FINSH
+static volatile rt_bool_t heater_print_enabled = RT_FALSE;
+static rt_tick_t heater_last_print_tick;
+
+static void heater_print_snapshot(const cooling_heater_snapshot_t *snapshot)
+{
+    rt_kprintf("heater seq=%u tick=%u output=%s\n",
+               (unsigned int)snapshot->sequence,
+               (unsigned int)snapshot->tick,
+               snapshot->heater_on ? "on" : "off");
+}
+#endif
 
 void cooling_heater_start(void)
 {
@@ -32,6 +46,10 @@ void cooling_heater_start(void)
     /* 建立初始状态：加热关闭。 */
     rt_memset(&heater_snapshot, 0, sizeof(heater_snapshot));
     heater_snapshot.tick = rt_tick_get();
+
+#ifdef RT_USING_FINSH
+    heater_last_print_tick = heater_snapshot.tick;
+#endif
 }
 
 rt_err_t cooling_heater_set(rt_bool_t enabled)
@@ -99,20 +117,62 @@ void cooling_heater_get_snapshot(cooling_heater_snapshot_t *snapshot)
 }
 
 #ifdef RT_USING_FINSH
-/* 调试命令：在 MSH 中输入 heater_status 查看加热输出状态。 */
-static void heater_status(int argc, char **argv)
+void cooling_heater_debug_poll(void)
 {
     cooling_heater_snapshot_t snapshot;
+    rt_tick_t now = rt_tick_get();
+
+    if (!heater_print_enabled)
+    {
+        heater_last_print_tick = now;
+        return;
+    }
+
+    if ((now - heater_last_print_tick) <
+        rt_tick_from_millisecond(COOLING_STATUS_PRINT_PERIOD_MS))
+    {
+        return;
+    }
+
+    cooling_heater_get_snapshot(&snapshot);
+    heater_print_snapshot(&snapshot);
+    heater_last_print_tick = now;
+}
+
+/* 每次执行 heater_status，反转加热状态的循环打印。 */
+static void heater_status(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    heater_print_enabled = heater_print_enabled ? RT_FALSE : RT_TRUE;
+    rt_kprintf("heater print %s\n",
+               heater_print_enabled ? "on" : "off");
+}
+MSH_CMD_EXPORT(heater_status, toggle continuous heater status printing);
+
+/*
+ * 无 CAN 调试时，由 MSH 本地切换系统的加热允许状态。
+ * 开启后仍由压力任务决定实际输出；关闭时立即关断加热。
+ */
+static void heater_power(int argc, char **argv)
+{
+    cooling_safety_snapshot_t safety;
+    rt_bool_t enabled;
 
     (void)argc;
     (void)argv;
 
-    cooling_heater_get_snapshot(&snapshot);
+    cooling_safety_get_snapshot(&safety);
+    enabled = safety.power_on ? RT_FALSE : RT_TRUE;
+    cooling_safety_set_power(enabled);
 
-    rt_kprintf("heater seq=%u tick=%u output=%s\n",
-               (unsigned int)snapshot.sequence,
-               (unsigned int)snapshot.tick,
-               snapshot.heater_on ? "on" : "off");
+    if (!enabled)
+    {
+        (void)cooling_heater_set(RT_FALSE);
+    }
+
+    rt_kprintf("heater power %s\n", enabled ? "on" : "off");
 }
-MSH_CMD_EXPORT(heater_status, show heater output state (read only));
+MSH_CMD_EXPORT(heater_power, toggle local heater power without CAN);
 #endif

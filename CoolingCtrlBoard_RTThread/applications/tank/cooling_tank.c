@@ -20,6 +20,11 @@
 static struct rt_mutex tank_lock;
 static cooling_tank_snapshot_t tank_snapshot;
 
+#ifdef RT_USING_FINSH
+static volatile rt_bool_t tank_print_enabled = RT_FALSE;
+static void tank_print_snapshot(const cooling_tank_snapshot_t *snapshot);
+#endif
+
 /*
  * 连续 N 次采到相同电平后才确认新状态。
  * 这里保留“电平”而不是直接解释为“触发/未触发”，因为限位开关
@@ -30,6 +35,10 @@ static void tank_monitor_entry(void *parameter)
     rt_uint8_t candidate_level = 0U;
     rt_uint8_t candidate_count = 0U;
     rt_bool_t previous_present = RT_FALSE;
+
+#ifdef RT_USING_FINSH
+    rt_tick_t last_print_tick = rt_tick_get();
+#endif
 
     (void)parameter;
 
@@ -97,6 +106,22 @@ static void tank_monitor_entry(void *parameter)
             previous_present = present;
         }
 
+#ifdef RT_USING_FINSH
+        if (!tank_print_enabled)
+        {
+            last_print_tick = rt_tick_get();
+        }
+        else if ((rt_tick_get() - last_print_tick) >=
+                 rt_tick_from_millisecond(COOLING_STATUS_PRINT_PERIOD_MS))
+        {
+            cooling_tank_snapshot_t snapshot;
+
+            cooling_tank_get_snapshot(&snapshot);
+            tank_print_snapshot(&snapshot);
+            last_print_tick = snapshot.tick;
+        }
+#endif
+
         rt_thread_mdelay(COOLING_TANK_SAMPLE_PERIOD_MS);
     }
 }
@@ -141,25 +166,27 @@ void cooling_tank_get_snapshot(cooling_tank_snapshot_t *snapshot)
 }
 
 #ifdef RT_USING_FINSH
-/* 调试命令：在 MSH 中输入 tank_status 查看罐体（LS）状态。 */
+static void tank_print_snapshot(const cooling_tank_snapshot_t *snapshot)
+{
+    rt_kprintf("tank seq=%u tick=%u raw=%u stable=%u valid=%u "
+               "present=%s changes=%u\n",
+               (unsigned int)snapshot->sequence,
+               (unsigned int)snapshot->tick,
+               (unsigned int)snapshot->raw_level,
+               (unsigned int)snapshot->stable_level,
+               (unsigned int)snapshot->valid,
+               snapshot->tank_present ? "yes" : "no",
+               (unsigned int)snapshot->change_count);
+}
+
+/* 每次执行 tank_status，反转罐体状态的循环打印。 */
 static void tank_status(int argc, char **argv)
 {
-    cooling_tank_snapshot_t snapshot;
-
     (void)argc;
     (void)argv;
 
-    cooling_tank_get_snapshot(&snapshot);
-
-    rt_kprintf("tank seq=%u tick=%u raw=%u stable=%u valid=%u "
-               "present=%s changes=%u\n",
-               (unsigned int)snapshot.sequence,
-               (unsigned int)snapshot.tick,
-               (unsigned int)snapshot.raw_level,
-               (unsigned int)snapshot.stable_level,
-               (unsigned int)snapshot.valid,
-               snapshot.tank_present ? "yes" : "no",
-               (unsigned int)snapshot.change_count);
+    tank_print_enabled = tank_print_enabled ? RT_FALSE : RT_TRUE;
+    rt_kprintf("tank print %s\n", tank_print_enabled ? "on" : "off");
 }
-MSH_CMD_EXPORT(tank_status, show debounced tank/LS input state (read only));
+MSH_CMD_EXPORT(tank_status, toggle continuous tank status printing);
 #endif

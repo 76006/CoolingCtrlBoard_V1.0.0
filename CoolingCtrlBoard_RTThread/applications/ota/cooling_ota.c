@@ -454,15 +454,16 @@ static void ota_worker_entry(void *parameter)
 
     while (1)
     {
-        rt_err_t result = rt_mq_recv(ota_queue, &msg, sizeof(msg), timeout);
+        rt_ssize_t received_size =
+            rt_mq_recv(ota_queue, &msg, sizeof(msg), timeout);
 
-        if (result == -RT_ETIMEOUT)
+        if (received_size == -RT_ETIMEOUT)
         {
             /* 空闲检查：只终止 RECEIVING 状态。 */
             ota_check_timeout();
             continue;
         }
-        if (result != RT_EOK)
+        if (received_size != (rt_ssize_t)sizeof(msg))
         {
             continue;
         }

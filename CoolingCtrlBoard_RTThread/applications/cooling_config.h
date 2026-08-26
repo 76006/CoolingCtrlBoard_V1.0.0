@@ -12,8 +12,8 @@
 
 #include "adc/cooling_adc_channels.h"
 
-/* ADC 电气参数。当前毫伏值按 3.3 V 标称参考电压计算。 */
-#define COOLING_ADC_REFERENCE_MV               3300U
+/* MCU 的 VDDA/VREF+ 接 VREF_3V，ADC 毫伏值按 3.0 V 标称值计算。 */
+#define COOLING_ADC_REFERENCE_MV               3000U
 #define COOLING_ADC_FULL_SCALE                 4095U
 
 /* ADC 每 100 ms 采样一次；中值窗口必须为大于 1 的奇数。 */
@@ -23,6 +23,9 @@
 /* IIR: y += (x - y) / divisor，数值越大，输出越平滑。 */
 #define COOLING_ADC_IIR_DIVISOR                4
 #define COOLING_ADC_IIR_SCALE                  256
+
+/* pressure_status、tank_status、heater_status 的循环打印周期。 */
+#define COOLING_STATUS_PRINT_PERIOD_MS          500U
 
 /* ADC 采样线程参数。RT-Thread 优先级数值越小，优先级越高。 */
 #define COOLING_ADC_THREAD_STACK_SIZE          1024U
@@ -36,14 +39,14 @@
 #define COOLING_TANK_THREAD_PRIORITY           14U
 #define COOLING_TANK_THREAD_TIMESLICE          10U
 
-/* 传感器标定与物理量换算。没有实测标定数据时开关保持为 0。 */
-#define COOLING_TEMPERATURE_ADC_INPUT            COOLING_ADC_NTC0
-#define COOLING_PRESSURE_CALIBRATED               0U
-#define COOLING_TEMPERATURE_CALIBRATED            0U
-#define COOLING_PRESSURE_ADC_FULL_MPA1000         0U
-#define COOLING_PRESSURE_ADC_OFFSET_MPA1000       0U
-#define COOLING_TEMPERATURE_ADC_FULL_DEG10        0U
-#define COOLING_TEMPERATURE_ADC_OFFSET_DEG10      0U
+/* NTC0/NTC1 均为 VREF_3V -- 10k 上拉 -- ADC -- NTC -- GND。 */
+#define COOLING_NTC_SUPPLY_MV                     3000U
+#define COOLING_NTC_PULLUP_OHM                    10000U
+
+/* PM13V 理论换算：0 MPa 对应 ADC 0，2.000 MPa 对应 ADC 3131。 */
+#define COOLING_PRESSURE_CALIBRATED               1U
+#define COOLING_PRESSURE_ADC_FULL                 3131U
+#define COOLING_PRESSURE_FULL_MPA1000             2000U
 
 /* ---------------------------------------------------------------------
  * 冷媒压力加热控制配置（方案 A：GPIO 软件 PWM + 分阶段加热控制）
@@ -53,23 +56,29 @@
 #define COOLING_PRESSURE_CONTROL_PERIOD_MS      50U
 #define COOLING_PRESSURE_PWM_WINDOW_MS          1000U
 
-/* 升压阶段满功率加热，维持阶段低功率加热，单位 %（0..100）。 */
-#define COOLING_PRESSURE_BOOST_DUTY_PERCENT     100U
-#define COOLING_PRESSURE_MAINTAIN_DUTY_PERCENT  35U
+/* 温度单位为 0.1 摄氏度；滞回 10 表示目标上下各 1.0 摄氏度。 */
+#define COOLING_WARMUP_TARGET_TEMP_DEG10          600
+#define COOLING_WARMUP_TEMP_HYSTERESIS_DEG10       10
+#define COOLING_HOLD_TARGET_TEMP_DEG10            400
+#define COOLING_HOLD_TEMP_HYSTERESIS_DEG10         10
 
-/*
- * ---- 以下压力阈值均为占位值，需按传感器标定后修改，不代表实际压力 ----
- */
-#define COOLING_PRESSURE_TARGET_ADC             2048U
-#define COOLING_PRESSURE_HYSTERESIS_DOWN_ADC    64U
-#define COOLING_PRESSURE_HYSTERESIS_UP_ADC      64U
-/* ---- 占位阈值结束 --------------------------------------------------- */
+/* 升到目标温度使用满功率，升温目标/40 摄氏度保温使用低功率软件 PWM。 */
+#define COOLING_WARMUP_DUTY_PERCENT              100U
+#define COOLING_WARMUP_HOLD_DUTY_PERCENT          50U
+#define COOLING_FINAL_HOLD_DUTY_PERCENT           35U
+
+/* 压力达到 0.650 MPa 后，从升温目标切换到 40 摄氏度保温。 */
+#define COOLING_PRESSURE_TARGET_MPA1000           650U
+#define COOLING_PRESSURE_TARGET_ADC                \
+    ((COOLING_PRESSURE_TARGET_MPA1000 * COOLING_PRESSURE_ADC_FULL +       \
+      (COOLING_PRESSURE_FULL_MPA1000 / 2U)) /                             \
+     COOLING_PRESSURE_FULL_MPA1000)
 
 /* 压力连续达到目标并保持该时间后，才确认“冷媒充足”。 */
 #define COOLING_PRESSURE_CONFIRM_TIME_MS        1000U
 
 /* 升压总时长超过该值仍未达标，判定冷媒不足并锁存到拔罐。 */
-#define COOLING_PRESSURE_MAX_BOOST_TIME_MS      60000U
+#define COOLING_PRESSURE_MAX_BOOST_TIME_MS      300000U
 
 /* ADC 快照超过该时间未更新视为陈旧，立即关闭加热。 */
 #define COOLING_PRESSURE_ADC_MAX_AGE_MS         500U

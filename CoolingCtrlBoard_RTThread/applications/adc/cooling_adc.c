@@ -100,8 +100,149 @@ static const char *const adc_input_name[COOLING_ADC_CHANNEL_COUNT] =
     "hysn2"
 };
 
+/*
+ * TDK NTCG163JX103DT1S RT table, -40 to 150 degrees C in 5 degree steps.
+ * Values are resistance in ohms.  Temperature is interpolated between the
+ * two nearest entries; no floating-point library is needed on the MCU.
+ */
+static const rt_uint32_t ntc0_resistance_ohm[] =
+{
+    188500U, 144300U, 111300U,  86600U,  67800U,
+     53460U,  42450U,  33930U,  27280U,  22070U,
+     17960U,  14700U,  12090U,  10000U,   8310U,
+      6940U,   5826U,   4911U,   4158U,   3536U,
+      3019U,   2588U,   2227U,   1924U,   1668U,
+      1451U,   1267U,   1110U,    975U,    860U,
+       760U,    674U,    599U,    534U,    478U,
+       428U,    385U,    346U,    313U
+};
+
+/*
+ * NTC1: ZY103I3950AI-1 (1%), manufacturer Rnom table.
+ * -40 to 150 degrees C in 1 degree steps; values are resistance in ohms.
+ */
+static const rt_uint32_t ntc1_resistance_ohm[] =
+{
+    277225U, 263577U, 250070U, 236830U, 223952U, 211513U, 199566U, 188149U,
+    177284U, 166983U, 157246U, 148067U, 139432U, 131325U, 123726U, 116610U,
+    109955U, 103734U,  97923U,  92496U,  87429U,  82788U,  78439U,  74359U,
+     70527U,  66925U,  63535U,  60343U,  57334U,  54495U,  51815U,  49283U,
+     46890U,  44625U,  42481U,  40450U,  38526U,  36702U,  34971U,  33329U,
+     31770U,  30253U,  28816U,  27453U,  26161U,  24935U,  23772U,  22668U,
+     21621U,  20626U,  19682U,  18785U,  17933U,  17123U,  16353U,  15621U,
+     14925U,  14264U,  13634U,  13035U,  12465U,  11923U,  11406U,  10915U,
+     10446U,  10000U,   9575U,   9170U,   8784U,   8416U,   8064U,   7730U,
+      7410U,   7106U,   6815U,   6538U,   6273U,   6020U,   5778U,   5548U,
+      5327U,   5116U,   4915U,   4723U,   4539U,   4363U,   4195U,   4034U,
+      3880U,   3733U,   3592U,   3457U,   3328U,   3204U,   3086U,   2972U,
+      2863U,   2759U,   2659U,   2564U,   2472U,   2384U,   2299U,   2218U,
+      2140U,   2066U,   1994U,   1926U,   1860U,   1796U,   1735U,   1677U,
+      1621U,   1567U,   1515U,   1465U,   1417U,   1371U,   1326U,   1284U,
+      1242U,   1203U,   1165U,   1128U,   1093U,   1059U,   1027U,    996U,
+       965U,    936U,    908U,    881U,    855U,    830U,    805U,    782U,
+       759U,    737U,    715U,    694U,    674U,    656U,    638U,    620U,
+       603U,    586U,    569U,    554U,    538U,    523U,    508U,    494U,
+       480U,    467U,    454U,    441U,    429U,    417U,    406U,    394U,
+       384U,    373U,    363U,    353U,    343U,    334U,    325U,    317U,
+       308U,    300U,    292U,    285U,    277U,    270U,    263U,    256U,
+       250U,    244U,    238U,    232U,    226U,    220U,    215U,    210U,
+       204U,    199U,    195U,    190U,    186U,    181U,    177U
+};
+
+#define NTC_TABLE_FIRST_TEMP_DEG10        (-400)
+#define NTC0_TABLE_STEP_DEG10               50
+#define NTC1_TABLE_STEP_DEG10               10
+#define NTC0_TABLE_COUNT                   \
+    (sizeof(ntc0_resistance_ohm) / sizeof(ntc0_resistance_ohm[0]))
+#define NTC1_TABLE_COUNT                   \
+    (sizeof(ntc1_resistance_ohm) / sizeof(ntc1_resistance_ohm[0]))
+
+static int ntc_temperature_from_adc(rt_uint16_t filtered_adc,
+                                    const rt_uint32_t *resistance_table,
+                                    rt_size_t table_count,
+                                    rt_uint16_t table_step_deg10,
+                                    rt_int16_t *temperature_deg10);
+
+static int ntc_input_temperature_from_adc(cooling_adc_input_t input,
+                                          rt_uint16_t filtered_adc,
+                                          rt_int16_t *temperature_deg10)
+{
+    if (input == COOLING_ADC_NTC0)
+    {
+        return ntc_temperature_from_adc(filtered_adc,
+                                        ntc0_resistance_ohm,
+                                        NTC0_TABLE_COUNT,
+                                        NTC0_TABLE_STEP_DEG10,
+                                        temperature_deg10);
+    }
+
+    if (input == COOLING_ADC_NTC1)
+    {
+        return ntc_temperature_from_adc(filtered_adc,
+                                        ntc1_resistance_ohm,
+                                        NTC1_TABLE_COUNT,
+                                        NTC1_TABLE_STEP_DEG10,
+                                        temperature_deg10);
+    }
+
+    return -1;
+}
+
 static struct rt_mutex adc_snapshot_lock;
 static cooling_adc_snapshot_t adc_snapshot;
+
+#ifdef RT_USING_FINSH
+static volatile rt_bool_t adc_print_enabled = RT_FALSE;
+
+static void adc_print_snapshot(const cooling_adc_snapshot_t *snapshot)
+{
+    rt_uint8_t input;
+
+    rt_kprintf("adc seq=%u tick=%u valid=0x%02x\n",
+               (unsigned int)snapshot->sequence,
+               (unsigned int)snapshot->tick,
+               (unsigned int)snapshot->valid_mask);
+    for (input = 0U; input < COOLING_ADC_CHANNEL_COUNT; input++)
+    {
+        rt_bool_t valid =
+            (snapshot->valid_mask & COOLING_ADC_VALID_BIT(input)) != 0U;
+
+        rt_kprintf("  %s: raw=%u filtered=%u mv=%u %s",
+                   adc_input_name[input],
+                   (unsigned int)snapshot->value[input].raw,
+                   (unsigned int)snapshot->value[input].filtered,
+                   (unsigned int)snapshot->value[input].millivolts,
+                   valid ? "valid" : "invalid");
+
+        if (valid && (input <= COOLING_ADC_NTC1))
+        {
+            rt_int16_t temperature_deg10;
+
+            if (ntc_input_temperature_from_adc(
+                    (cooling_adc_input_t)input,
+                    snapshot->value[input].filtered,
+                    &temperature_deg10) == 0)
+            {
+                rt_int32_t absolute_temperature = temperature_deg10;
+
+                if (absolute_temperature < 0)
+                {
+                    absolute_temperature = -absolute_temperature;
+                }
+                rt_kprintf(" temp=%s%d.%dC",
+                           (temperature_deg10 < 0) ? "-" : "",
+                           (int)(absolute_temperature / 10),
+                           (int)(absolute_temperature % 10));
+            }
+            else
+            {
+                rt_kprintf(" temp=invalid");
+            }
+        }
+        rt_kprintf("\n");
+    }
+}
+#endif
 
 /*
  * ADC 任务是硬件 ADC 的唯一使用者。
@@ -162,6 +303,13 @@ static void adc_sample_entry(void *parameter)
         }
         previous_valid_mask = next_snapshot.valid_mask;
 
+#ifdef RT_USING_FINSH
+        if (adc_print_enabled)
+        {
+            adc_print_snapshot(&next_snapshot);
+        }
+#endif
+
         rt_thread_mdelay(COOLING_ADC_SAMPLE_PERIOD_MS);
     }
 }
@@ -208,35 +356,88 @@ void cooling_adc_get_snapshot(cooling_adc_snapshot_t *snapshot)
     rt_mutex_release(&adc_snapshot_lock);
 }
 
-/* 线性换算：value = (adc * scale) / 4095 + offset。 */
-#if (COOLING_PRESSURE_CALIBRATED != 0) || \
-    (COOLING_TEMPERATURE_CALIBRATED != 0)
-static uint32_t adc_linear_value(uint16_t filtered_adc,
-                                 uint32_t scale,
-                                 uint32_t offset)
+static int ntc_temperature_from_adc(rt_uint16_t filtered_adc,
+                                    const rt_uint32_t *resistance_table,
+                                    rt_size_t table_count,
+                                    rt_uint16_t table_step_deg10,
+                                    rt_int16_t *temperature_deg10)
 {
-    uint32_t value;
+    rt_uint32_t voltage_mv;
+    rt_uint32_t denominator;
+    rt_uint32_t resistance;
+    rt_uint32_t index;
+    rt_int32_t temperature;
 
-    value = ((uint32_t)filtered_adc * scale) / COOLING_ADC_FULL_SCALE;
-    value += offset;
-    if (value > UINT16_MAX)
+    voltage_mv = ((rt_uint32_t)filtered_adc * COOLING_ADC_REFERENCE_MV +
+                  (COOLING_ADC_FULL_SCALE / 2U)) /
+                 COOLING_ADC_FULL_SCALE;
+    if (voltage_mv >= COOLING_NTC_SUPPLY_MV)
     {
-        value = UINT16_MAX;
+        return -1;
     }
 
-    return value;
+    denominator = COOLING_NTC_SUPPLY_MV - voltage_mv;
+    resistance = (COOLING_NTC_PULLUP_OHM * voltage_mv +
+                  (denominator / 2U)) / denominator;
+
+    if ((resistance > resistance_table[0]) ||
+        (resistance < resistance_table[table_count - 1U]))
+    {
+        return -1;
+    }
+
+    if (resistance == resistance_table[table_count - 1U])
+    {
+        *temperature_deg10 =
+            (rt_int16_t)(NTC_TABLE_FIRST_TEMP_DEG10 +
+                         (rt_int32_t)((table_count - 1U) *
+                                      table_step_deg10));
+        return 0;
+    }
+
+    for (index = 0U; index < (table_count - 1U); index++)
+    {
+        rt_uint32_t upper_resistance = resistance_table[index];
+        rt_uint32_t lower_resistance = resistance_table[index + 1U];
+
+        if ((resistance <= upper_resistance) &&
+            (resistance >= lower_resistance))
+        {
+            rt_uint32_t resistance_span =
+                upper_resistance - lower_resistance;
+            rt_uint32_t temperature_offset =
+                ((upper_resistance - resistance) *
+                 table_step_deg10 +
+                 (resistance_span / 2U)) / resistance_span;
+
+            temperature = NTC_TABLE_FIRST_TEMP_DEG10 +
+                          (rt_int32_t)(index *
+                                       table_step_deg10) +
+                          (rt_int32_t)temperature_offset;
+            *temperature_deg10 = (rt_int16_t)temperature;
+            return 0;
+        }
+    }
+
+    return -1;
 }
-#endif
 
 int cooling_sensor_pressure_mpa1000(uint16_t filtered_adc,
                                     uint16_t *pressure_mpa1000)
 {
     *pressure_mpa1000 = 0U;
 #if COOLING_PRESSURE_CALIBRATED != 0
-    *pressure_mpa1000 = (uint16_t)adc_linear_value(
-        filtered_adc,
-        COOLING_PRESSURE_ADC_FULL_MPA1000,
-        COOLING_PRESSURE_ADC_OFFSET_MPA1000);
+    if (filtered_adc >= COOLING_PRESSURE_ADC_FULL)
+    {
+        *pressure_mpa1000 = COOLING_PRESSURE_FULL_MPA1000;
+    }
+    else
+    {
+        *pressure_mpa1000 = (uint16_t)(
+            ((uint32_t)filtered_adc * COOLING_PRESSURE_FULL_MPA1000 +
+             (COOLING_PRESSURE_ADC_FULL / 2U)) /
+            COOLING_PRESSURE_ADC_FULL);
+    }
     return 0;
 #else
     (void)filtered_adc;
@@ -244,55 +445,47 @@ int cooling_sensor_pressure_mpa1000(uint16_t filtered_adc,
 #endif
 }
 
-int cooling_sensor_temperature_deg10(uint16_t *temperature_deg10)
+int cooling_sensor_ntc1_temperature_deg10(int16_t *temperature_deg10)
 {
     cooling_adc_snapshot_t adc;
-    uint8_t channel = (uint8_t)COOLING_TEMPERATURE_ADC_INPUT;
 
-    *temperature_deg10 = 0U;
+    *temperature_deg10 = 0;
     cooling_adc_get_snapshot(&adc);
-    if ((adc.valid_mask & COOLING_ADC_VALID_BIT(channel)) == 0U)
+    if ((adc.valid_mask & COOLING_ADC_VALID_BIT(COOLING_ADC_NTC1)) == 0U)
     {
         return -1;
     }
 
-#if COOLING_TEMPERATURE_CALIBRATED != 0
-    *temperature_deg10 = (uint16_t)adc_linear_value(
-        adc.value[channel].filtered,
-        COOLING_TEMPERATURE_ADC_FULL_DEG10,
-        COOLING_TEMPERATURE_ADC_OFFSET_DEG10);
+    return ntc_input_temperature_from_adc(
+        COOLING_ADC_NTC1,
+        adc.value[COOLING_ADC_NTC1].filtered,
+        temperature_deg10);
+}
+
+int cooling_sensor_temperature_deg10(uint16_t *temperature_deg10)
+{
+    rt_int16_t signed_temperature;
+
+    *temperature_deg10 = 0U;
+    if ((cooling_sensor_ntc1_temperature_deg10(&signed_temperature) != 0) ||
+        (signed_temperature < 0))
+    {
+        return -1;
+    }
+
+    *temperature_deg10 = (rt_uint16_t)signed_temperature;
     return 0;
-#else
-    return -1;
-#endif
 }
 
 #ifdef RT_USING_FINSH
-/* 调试命令：在 MSH 中输入 adc_values 查看三路采样值。 */
+/* 每次执行 adc_values，反转三路 ADC 的循环打印状态。 */
 static void adc_values(int argc, char **argv)
 {
-    cooling_adc_snapshot_t snapshot;
-    rt_uint8_t input;
-
     (void)argc;
     (void)argv;
 
-    cooling_adc_get_snapshot(&snapshot);
-
-    rt_kprintf("adc seq=%u tick=%u valid=0x%02x\n",
-               (unsigned int)snapshot.sequence,
-               (unsigned int)snapshot.tick,
-               (unsigned int)snapshot.valid_mask);
-    for (input = 0U; input < COOLING_ADC_CHANNEL_COUNT; input++)
-    {
-        rt_kprintf("  %s: raw=%u filtered=%u mv=%u %s\n",
-                   adc_input_name[input],
-                   (unsigned int)snapshot.value[input].raw,
-                   (unsigned int)snapshot.value[input].filtered,
-                   (unsigned int)snapshot.value[input].millivolts,
-                   (snapshot.valid_mask & COOLING_ADC_VALID_BIT(input)) ?
-                       "valid" : "invalid");
-    }
+    adc_print_enabled = adc_print_enabled ? RT_FALSE : RT_TRUE;
+    rt_kprintf("adc print %s\n", adc_print_enabled ? "on" : "off");
 }
-MSH_CMD_EXPORT(adc_values, show filtered CoolingCtrlBoard ADC values);
+MSH_CMD_EXPORT(adc_values, toggle continuous CoolingCtrlBoard ADC printing);
 #endif

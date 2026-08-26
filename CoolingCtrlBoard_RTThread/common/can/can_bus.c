@@ -95,6 +95,11 @@ int can_bus_start(can_bus_rx_handler_t handler)
     {
         return -1;
     }
+    if (rt_device_control(can_bus.device, RT_CAN_CMD_START,
+                          (void *)(rt_ubase_t)RT_TRUE) != RT_EOK)
+    {
+        return -1;
+    }
     if (rt_device_set_rx_indicate(can_bus.device, can_bus_rx_notify) != RT_EOK)
     {
         return -1;

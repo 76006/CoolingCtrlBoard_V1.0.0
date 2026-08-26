@@ -14,11 +14,17 @@
 #define CAN_SOFTWARE_VERSION          10000U
 #define CAN_HARDWARE_VERSION          10000U
 #define CAN_STATUS_PERIOD_MS          2000U
+#define CAN_TEST_PERIOD_MS             500U
 #define CAN_STATUS_STACK_SIZE         1024U
 #define CAN_STATUS_PRIORITY           17U
 #define CAN_STATUS_TIMESLICE          10U
 
 static struct rt_semaphore can_status_wakeup;
+static volatile rt_bool_t can_test_enabled = RT_FALSE;
+
+#ifdef RT_USING_FINSH
+static volatile rt_bool_t can_rx_print_enabled = RT_FALSE;
+#endif
 
 static void can_put_u16(uint8_t *data, uint16_t value)
 {
@@ -132,6 +138,25 @@ static void can_receive(const can_frame_t *frame)
     uint8_t frame_class;
     uint16_t function;
 
+#ifdef RT_USING_FINSH
+    if (can_rx_print_enabled)
+    {
+        uint8_t index;
+
+        rt_kprintf("can rx id=0x%08x %s %s dlc=%u data=",
+                   (unsigned int)frame->id,
+                   frame->format == CAN_FRAME_FORMAT_EXTENDED ? "ext" : "std",
+                   frame->type == CAN_FRAME_TYPE_DATA ? "data" : "remote",
+                   (unsigned int)frame->dlc);
+        for (index = 0U; index < frame->dlc; ++index)
+        {
+            rt_kprintf("%02x%s", (unsigned int)frame->data[index],
+                       (index + 1U < frame->dlc) ? " " : "");
+        }
+        rt_kprintf("\n");
+    }
+#endif
+
     if ((frame->format != CAN_FRAME_FORMAT_EXTENDED) ||
         (frame->type != CAN_FRAME_TYPE_DATA))
     {
@@ -194,26 +219,50 @@ static void can_receive(const can_frame_t *frame)
 static void can_status_entry(void *parameter)
 {
     cooling_safety_snapshot_t safety;
+    rt_tick_t last_status_tick = rt_tick_get();
+    rt_tick_t last_test_tick = last_status_tick;
 
     (void)parameter;
     while (1)
     {
+        rt_tick_t now;
+        rt_uint32_t wait_ms;
+
         cooling_safety_get_snapshot(&safety);
-        if (!safety.power_on)
+        if (!safety.power_on && !can_test_enabled)
         {
             (void)rt_sem_take(&can_status_wakeup, RT_WAITING_FOREVER);
+            last_status_tick = rt_tick_get();
+            last_test_tick = last_status_tick;
             continue;
         }
 
-        if (rt_sem_take(&can_status_wakeup,
-                        rt_tick_from_millisecond(CAN_STATUS_PERIOD_MS)) ==
-            -RT_ETIMEOUT)
+        wait_ms = can_test_enabled ? CAN_TEST_PERIOD_MS : CAN_STATUS_PERIOD_MS;
+        (void)rt_sem_take(&can_status_wakeup,
+                          rt_tick_from_millisecond(wait_ms));
+
+        now = rt_tick_get();
+        if (can_test_enabled &&
+            ((now - last_test_tick) >=
+             rt_tick_from_millisecond(CAN_TEST_PERIOD_MS)))
         {
-            cooling_safety_get_snapshot(&safety);
-            if (safety.power_on)
+            can_send_handshake();
+            last_test_tick = now;
+        }
+
+        cooling_safety_get_snapshot(&safety);
+        if (safety.power_on)
+        {
+            if ((now - last_status_tick) >=
+                rt_tick_from_millisecond(CAN_STATUS_PERIOD_MS))
             {
                 can_send_status();
+                last_status_tick = now;
             }
+        }
+        else
+        {
+            last_status_tick = now;
         }
     }
 }
@@ -246,3 +295,31 @@ rt_err_t cooling_can_start(void)
 
     return RT_EOK;
 }
+
+#ifdef RT_USING_FINSH
+/* 每次执行 can_rx_print，反转 CAN 接收帧的持续打印状态。 */
+static void can_rx_print(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    can_rx_print_enabled = can_rx_print_enabled ? RT_FALSE : RT_TRUE;
+    rt_kprintf("CAN RX print %s\n",
+               can_rx_print_enabled ? "on" : "off");
+}
+MSH_CMD_EXPORT(can_rx_print, toggle continuous CAN RX frame printing);
+
+/* 每次执行 cantest，反转固定 CAN 握手帧的周期发送状态。 */
+static void cantest(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    can_test_enabled = can_test_enabled ? RT_FALSE : RT_TRUE;
+    rt_sem_release(&can_status_wakeup);
+    rt_kprintf("CAN test %s, id=0x08202100 period=%ums\n",
+               can_test_enabled ? "on" : "off",
+               (unsigned int)CAN_TEST_PERIOD_MS);
+}
+MSH_CMD_EXPORT(cantest, toggle periodic CAN handshake frame transmission);
+#endif

@@ -172,9 +172,16 @@ void boot_fota_jump_to_app(void)
     uint32_t index;
 
     __disable_irq();
+
+    (void)HAL_RCC_DeInit();
+    (void)HAL_DeInit();
+
     SysTick->CTRL = 0U;
     SysTick->LOAD = 0U;
     SysTick->VAL = 0U;
+    SCB->ICSR = SCB_ICSR_PENDSTCLR_Msk | SCB_ICSR_PENDSVCLR_Msk;
+    __DSB();
+    __ISB();
 
     for (index = 0U; index < 8U; ++index)
     {
@@ -182,8 +189,6 @@ void boot_fota_jump_to_app(void)
         NVIC->ICPR[index] = UINT32_MAX;
     }
 
-    (void)HAL_RCC_DeInit();
-    (void)HAL_DeInit();
     SCB->VTOR = COOLING_APP_START_ADDRESS;
     __DSB();
     __ISB();

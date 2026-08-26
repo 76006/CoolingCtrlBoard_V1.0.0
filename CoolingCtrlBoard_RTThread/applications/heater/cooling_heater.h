@@ -39,6 +39,11 @@ rt_err_t cooling_heater_set(rt_bool_t enabled);
 /* 复制一份线程安全的加热快照；不能在中断中调用。 */
 void cooling_heater_get_snapshot(cooling_heater_snapshot_t *snapshot);
 
+#ifdef RT_USING_FINSH
+/* 由现有控制任务周期调用，不创建单独的调试线程。 */
+void cooling_heater_debug_poll(void);
+#endif
+
 #ifdef __cplusplus
 }
 #endif
