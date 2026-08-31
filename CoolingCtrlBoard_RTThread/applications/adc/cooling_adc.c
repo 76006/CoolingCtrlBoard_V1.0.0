@@ -192,10 +192,11 @@ static struct rt_mutex adc_snapshot_lock;
 static cooling_adc_snapshot_t adc_snapshot;
 
 #ifdef RT_USING_FINSH
-static volatile rt_bool_t adc_print_enabled = RT_FALSE;
+static volatile rt_uint8_t adc_print_mask = 0U;
 
 static void adc_print_snapshot(const cooling_adc_snapshot_t *snapshot)
 {
+    rt_uint8_t print_mask = adc_print_mask;
     rt_uint8_t input;
 
     rt_kprintf("adc seq=%u tick=%u valid=0x%02x\n",
@@ -206,6 +207,11 @@ static void adc_print_snapshot(const cooling_adc_snapshot_t *snapshot)
     {
         rt_bool_t valid =
             (snapshot->valid_mask & COOLING_ADC_VALID_BIT(input)) != 0U;
+
+        if ((print_mask & COOLING_ADC_VALID_BIT(input)) == 0U)
+        {
+            continue;
+        }
 
         rt_kprintf("  %s: raw=%u filtered=%u mv=%u %s",
                    adc_input_name[input],
@@ -237,6 +243,23 @@ static void adc_print_snapshot(const cooling_adc_snapshot_t *snapshot)
             else
             {
                 rt_kprintf(" temp=invalid");
+            }
+        }
+        else if (valid && (input == COOLING_ADC_HYSN2))
+        {
+            rt_uint16_t pressure_mpa1000;
+
+            if (cooling_sensor_pressure_mpa1000(
+                    snapshot->value[input].filtered,
+                    &pressure_mpa1000) == 0)
+            {
+                rt_kprintf(" pressure=%u.%03uMPa",
+                           (unsigned int)(pressure_mpa1000 / 1000U),
+                           (unsigned int)(pressure_mpa1000 % 1000U));
+            }
+            else
+            {
+                rt_kprintf(" pressure=invalid");
             }
         }
         rt_kprintf("\n");
@@ -304,7 +327,7 @@ static void adc_sample_entry(void *parameter)
         previous_valid_mask = next_snapshot.valid_mask;
 
 #ifdef RT_USING_FINSH
-        if (adc_print_enabled)
+        if (adc_print_mask != 0U)
         {
             adc_print_snapshot(&next_snapshot);
         }
@@ -427,16 +450,22 @@ int cooling_sensor_pressure_mpa1000(uint16_t filtered_adc,
 {
     *pressure_mpa1000 = 0U;
 #if COOLING_PRESSURE_CALIBRATED != 0
-    if (filtered_adc >= COOLING_PRESSURE_ADC_FULL)
+    if (filtered_adc <= COOLING_PRESSURE_ADC_ZERO)
+    {
+        *pressure_mpa1000 = 0U;
+    }
+    else if (filtered_adc >= COOLING_PRESSURE_ADC_FULL)
     {
         *pressure_mpa1000 = COOLING_PRESSURE_FULL_MPA1000;
     }
     else
     {
         *pressure_mpa1000 = (uint16_t)(
-            ((uint32_t)filtered_adc * COOLING_PRESSURE_FULL_MPA1000 +
-             (COOLING_PRESSURE_ADC_FULL / 2U)) /
-            COOLING_PRESSURE_ADC_FULL);
+            ((uint32_t)(filtered_adc - COOLING_PRESSURE_ADC_ZERO) *
+             COOLING_PRESSURE_FULL_MPA1000 +
+             ((COOLING_PRESSURE_ADC_FULL -
+               COOLING_PRESSURE_ADC_ZERO) / 2U)) /
+            (COOLING_PRESSURE_ADC_FULL - COOLING_PRESSURE_ADC_ZERO));
     }
     return 0;
 #else
@@ -478,14 +507,48 @@ int cooling_sensor_temperature_deg10(uint16_t *temperature_deg10)
 }
 
 #ifdef RT_USING_FINSH
-/* 每次执行 adc_values，反转三路 ADC 的循环打印状态。 */
+static void adc_toggle_print(cooling_adc_input_t input)
+{
+    rt_uint8_t bit = COOLING_ADC_VALID_BIT(input);
+
+    adc_print_mask ^= bit;
+    rt_kprintf("%s print %s\n", adc_input_name[input],
+               (adc_print_mask & bit) ? "on" : "off");
+}
+
+/* 每次执行 adc_values，同时开启或关闭三路 ADC 循环打印。 */
 static void adc_values(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
 
-    adc_print_enabled = adc_print_enabled ? RT_FALSE : RT_TRUE;
-    rt_kprintf("adc print %s\n", adc_print_enabled ? "on" : "off");
+    adc_print_mask = (adc_print_mask == COOLING_ADC_VALID_ALL) ?
+        0U : COOLING_ADC_VALID_ALL;
+    rt_kprintf("all adc print %s\n", adc_print_mask ? "on" : "off");
 }
 MSH_CMD_EXPORT(adc_values, toggle continuous CoolingCtrlBoard ADC printing);
+
+static void ntc0_values(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    adc_toggle_print(COOLING_ADC_NTC0);
+}
+MSH_CMD_EXPORT(ntc0_values, toggle continuous NTC0 printing);
+
+static void ntc1_values(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    adc_toggle_print(COOLING_ADC_NTC1);
+}
+MSH_CMD_EXPORT(ntc1_values, toggle continuous NTC1 printing);
+
+static void pressure_values(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    adc_toggle_print(COOLING_ADC_HYSN2);
+}
+MSH_CMD_EXPORT(pressure_values, toggle continuous pressure ADC printing);
 #endif

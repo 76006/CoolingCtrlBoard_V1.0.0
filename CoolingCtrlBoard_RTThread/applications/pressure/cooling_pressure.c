@@ -21,10 +21,10 @@ static cooling_pressure_snapshot_t pressure_snapshot;
 static cooling_pressure_state_t pressure_state;
 static rt_bool_t pressure_sufficient;
 static rt_bool_t pressure_low_latched;
+static rt_bool_t pressure_over_latched;
 static rt_bool_t pressure_maintain_on;
 static rt_bool_t pressure_warmup_complete;
 static rt_uint32_t pressure_boost_elapsed_ms;
-static rt_uint32_t pressure_confirm_elapsed_ms;
 static rt_uint32_t pressure_sequence;
 
 #ifdef RT_USING_FINSH
@@ -43,20 +43,22 @@ static void pressure_reset(void)
     pressure_state = COOLING_PRESSURE_STATE_STOP;
     pressure_sufficient = RT_FALSE;
     pressure_low_latched = RT_FALSE;
+    pressure_over_latched = RT_FALSE;
     pressure_maintain_on = RT_FALSE;
     pressure_warmup_complete = RT_FALSE;
     pressure_boost_elapsed_ms = 0U;
-    pressure_confirm_elapsed_ms = 0U;
 }
 
 /* Return the heater duty for this control period. */
-static rt_uint8_t pressure_update(rt_uint16_t filtered_adc,
+static rt_uint8_t pressure_update(rt_uint16_t raw_adc,
+                                 rt_uint16_t filtered_adc,
                                  rt_int16_t temperature_deg10,
                                  rt_uint32_t block_reason,
                                  rt_uint32_t dt_ms)
 {
+    rt_uint32_t raw = raw_adc;
     rt_uint32_t filtered = filtered_adc;
-    rt_uint32_t target = COOLING_PRESSURE_TARGET_ADC;
+    rt_uint32_t pressure = (raw > filtered) ? raw : filtered;
 
     if ((block_reason & COOLING_PRESSURE_BLOCK_NO_TANK) != 0U)
     {
@@ -66,7 +68,9 @@ static rt_uint8_t pressure_update(rt_uint16_t filtered_adc,
 
     if (block_reason != COOLING_PRESSURE_BLOCK_NONE)
     {
-        pressure_state = COOLING_PRESSURE_STATE_STOP;
+        pressure_state =
+            ((block_reason & COOLING_PRESSURE_BLOCK_OVERPRESSURE) != 0U) ?
+            COOLING_PRESSURE_STATE_FAULT : COOLING_PRESSURE_STATE_STOP;
         pressure_maintain_on = RT_FALSE;
         return 0U;
     }
@@ -78,89 +82,99 @@ static rt_uint8_t pressure_update(rt_uint16_t filtered_adc,
         return 0U;
     }
 
-    if (pressure_sufficient)
+    /* 0.830 MPa 提前停热，为惯性升压到 0.850 MPa 留出余量。 */
+    if (pressure >= COOLING_PRESSURE_CONTROL_HIGH_ADC)
     {
         pressure_state = COOLING_PRESSURE_STATE_HOLD;
+        pressure_sufficient = RT_TRUE;
+        pressure_warmup_complete = RT_TRUE;
+        pressure_maintain_on = RT_FALSE;
+        return 0U;
+    }
 
+    /* 首次强热时压力先到 0.800 MPa，也立即转入压力保持阶段。 */
+    if (!pressure_sufficient &&
+        (pressure >= COOLING_PRESSURE_REHEAT_ADC))
+    {
+        pressure_sufficient = RT_TRUE;
+        pressure_warmup_complete = RT_TRUE;
+        pressure_maintain_on = RT_TRUE;
+    }
+
+    if (!pressure_sufficient)
+    {
+        pressure_state = COOLING_PRESSURE_STATE_HEATING;
+        pressure_boost_elapsed_ms += dt_ms;
+        if (pressure_boost_elapsed_ms >= COOLING_PRESSURE_MAX_BOOST_TIME_MS)
+        {
+            pressure_low_latched = RT_TRUE;
+            pressure_maintain_on = RT_FALSE;
+            pressure_state = COOLING_PRESSURE_STATE_FAULT;
+            return 0U;
+        }
+
+        /* 先用 100% 功率升到 60 摄氏度。 */
+        if (!pressure_warmup_complete)
+        {
+            if (temperature_deg10 < COOLING_WARMUP_TARGET_TEMP_DEG10)
+            {
+                return COOLING_WARMUP_DUTY_PERCENT;
+            }
+            pressure_warmup_complete = RT_TRUE;
+            pressure_maintain_on = RT_TRUE;
+        }
+
+        /*
+         * 温度先到 60 摄氏度但压力不足 0.800 MPa 时，继续在 60 摄氏度
+         * 附近保温。五分钟计时继续累计，达到压力目标或超时才退出。
+         */
         if (temperature_deg10 <=
-            (COOLING_HOLD_TARGET_TEMP_DEG10 -
-             COOLING_HOLD_TEMP_HYSTERESIS_DEG10))
+            (COOLING_WARMUP_TARGET_TEMP_DEG10 -
+             COOLING_WARMUP_TEMP_HYSTERESIS_DEG10))
         {
             pressure_maintain_on = RT_TRUE;
         }
         else if (temperature_deg10 >=
-                 (COOLING_HOLD_TARGET_TEMP_DEG10 +
-                  COOLING_HOLD_TEMP_HYSTERESIS_DEG10))
+                 (COOLING_WARMUP_TARGET_TEMP_DEG10 +
+                  COOLING_WARMUP_TEMP_HYSTERESIS_DEG10))
         {
             pressure_maintain_on = RT_FALSE;
         }
 
         return pressure_maintain_on ?
-            COOLING_FINAL_HOLD_DUTY_PERCENT : 0U;
-    }
-
-    pressure_state = COOLING_PRESSURE_STATE_HEATING;
-    pressure_boost_elapsed_ms += dt_ms;
-    if (pressure_boost_elapsed_ms >= COOLING_PRESSURE_MAX_BOOST_TIME_MS)
-    {
-        pressure_low_latched = RT_TRUE;
-        pressure_maintain_on = RT_FALSE;
-        pressure_state = COOLING_PRESSURE_STATE_FAULT;
-        return 0U;
-    }
-
-    /* 第一步先把 NTC1 升到设定温度。 */
-    if (!pressure_warmup_complete)
-    {
-        if (temperature_deg10 >= COOLING_WARMUP_TARGET_TEMP_DEG10)
-        {
-            pressure_warmup_complete = RT_TRUE;
-            pressure_maintain_on = RT_TRUE;
-            return COOLING_WARMUP_HOLD_DUTY_PERCENT;
-        }
-        return COOLING_WARMUP_DUTY_PERCENT;
-    }
-
-    /* 到达设定温度后，一边保温，一边确认压力达到 0.65 MPa。 */
-    if (filtered >= target)
-    {
-        pressure_confirm_elapsed_ms += dt_ms;
-        if (pressure_confirm_elapsed_ms >=
-            COOLING_PRESSURE_CONFIRM_TIME_MS)
-        {
-            pressure_sufficient = RT_TRUE;
-            pressure_maintain_on = RT_FALSE;
-            pressure_confirm_elapsed_ms = 0U;
-            pressure_state = COOLING_PRESSURE_STATE_HOLD;
-            return 0U;
-        }
+            COOLING_WARMUP_HOLD_DUTY_PERCENT : 0U;
     }
     else
     {
-        pressure_confirm_elapsed_ms = 0U;
+        pressure_state = COOLING_PRESSURE_STATE_HOLD;
+
+        /* 从上限回落时，0.800--0.830 MPa 区间保持关闭。 */
+        if (!pressure_maintain_on)
+        {
+            if (pressure > COOLING_PRESSURE_REHEAT_ADC)
+            {
+                return 0U;
+            }
+            pressure_maintain_on = RT_TRUE;
+        }
     }
 
-    if (temperature_deg10 <=
-        (COOLING_WARMUP_TARGET_TEMP_DEG10 -
-         COOLING_WARMUP_TEMP_HYSTERESIS_DEG10))
+    if (pressure < COOLING_PRESSURE_FAST_END_ADC)
     {
-        pressure_maintain_on = RT_TRUE;
+        return COOLING_PRESSURE_FAST_DUTY_PERCENT;
     }
-    else if (temperature_deg10 >=
-             (COOLING_WARMUP_TARGET_TEMP_DEG10 +
-              COOLING_WARMUP_TEMP_HYSTERESIS_DEG10))
+    if (pressure < COOLING_PRESSURE_SLOW_START_ADC)
     {
-        pressure_maintain_on = RT_FALSE;
+        return COOLING_PRESSURE_MEDIUM_DUTY_PERCENT;
     }
-
-    return pressure_maintain_on ?
-        COOLING_WARMUP_HOLD_DUTY_PERCENT : 0U;
+    return COOLING_PRESSURE_SLOW_DUTY_PERCENT;
 }
 
 static void pressure_control_entry(void *parameter)
 {
     rt_tick_t last_tick = rt_tick_get();
     rt_bool_t last_heater_level = RT_FALSE;
+    rt_bool_t last_power_on = RT_FALSE;
     rt_uint32_t window_elapsed_ms = 0U;
 
 #ifdef RT_USING_FINSH
@@ -191,6 +205,16 @@ static void pressure_control_entry(void *parameter)
 
         cooling_safety_get_snapshot(&safety);
         next.tank_present = safety.tank_present;
+
+        /* 加热允许从关闭变为开启时，重新执行一次 60 摄氏度强热。 */
+        if (safety.power_on && !last_power_on)
+        {
+            pressure_sufficient = RT_FALSE;
+            pressure_maintain_on = RT_FALSE;
+            pressure_warmup_complete = RT_FALSE;
+            pressure_boost_elapsed_ms = 0U;
+        }
+        last_power_on = safety.power_on;
 
         cooling_heater_get_snapshot(&heater);
         next.heater_on = heater.heater_on;
@@ -256,10 +280,23 @@ static void pressure_control_entry(void *parameter)
             block_reason |= COOLING_PRESSURE_BLOCK_TEMP_INVALID;
         }
 
+        /* 使用未滤波值做硬关断，避免滤波延迟造成超压。 */
+        if (adc_valid &&
+            (adc.value[COOLING_ADC_HYSN2].raw >=
+             COOLING_PRESSURE_CUTOFF_ADC))
+        {
+            pressure_over_latched = RT_TRUE;
+        }
+        if (pressure_over_latched)
+        {
+            block_reason |= COOLING_PRESSURE_BLOCK_OVERPRESSURE;
+        }
+
         dt_ms = pressure_ticks_to_ms(now - last_tick);
         last_tick = now;
-        duty_percent = pressure_update(next.filtered, temperature_deg10,
-                                       block_reason, dt_ms);
+        duty_percent = pressure_update(next.raw, next.filtered,
+                                       temperature_deg10, block_reason,
+                                       dt_ms);
 
         if (duty_percent == 0U)
         {
@@ -305,9 +342,7 @@ static void pressure_control_entry(void *parameter)
         next.refrigerant_sufficient = pressure_sufficient;
         next.refrigerant_low = pressure_low_latched;
         next.warmup_complete = pressure_warmup_complete;
-        next.target_temperature_deg10 = pressure_sufficient ?
-            COOLING_HOLD_TARGET_TEMP_DEG10 :
-            COOLING_WARMUP_TARGET_TEMP_DEG10;
+        next.target_temperature_deg10 = COOLING_WARMUP_TARGET_TEMP_DEG10;
         next.block_reason = block_reason;
 
         rt_mutex_take(&pressure_lock, RT_WAITING_FOREVER);
@@ -382,6 +417,8 @@ static void pressure_print_snapshot(const cooling_pressure_snapshot_t *snapshot)
 {
     rt_int32_t temperature = snapshot->temperature_deg10;
     rt_uint32_t absolute_temperature;
+    rt_uint16_t pressure_mpa1000 = 0U;
+    rt_bool_t pressure_valid = RT_FALSE;
 
     if (temperature < 0)
     {
@@ -390,6 +427,13 @@ static void pressure_print_snapshot(const cooling_pressure_snapshot_t *snapshot)
     else
     {
         absolute_temperature = (rt_uint32_t)temperature;
+    }
+
+    if (snapshot->adc_valid &&
+        (cooling_sensor_pressure_mpa1000(snapshot->filtered,
+                                         &pressure_mpa1000) == 0))
+    {
+        pressure_valid = RT_TRUE;
     }
 
     rt_kprintf("pressure seq=%u tick=%u state=%s duty=%u heater=%s "
@@ -402,20 +446,32 @@ static void pressure_print_snapshot(const cooling_pressure_snapshot_t *snapshot)
                snapshot->tank_present ? "present" : "absent",
                snapshot->adc_valid ? "valid" : "invalid",
                snapshot->temperature_valid ? "valid" : "invalid");
-    rt_kprintf("  hysn2: raw=%u filtered=%u mv=%u\n",
+    rt_kprintf("  hysn2: raw=%u filtered=%u mv=%u",
                (unsigned int)snapshot->raw,
                (unsigned int)snapshot->filtered,
                (unsigned int)snapshot->millivolts);
-    rt_kprintf("  ntc1: temp=%s%u.%uC target=%d.%dC warmup=%s\n",
+    if (pressure_valid)
+    {
+        rt_kprintf(" pressure=%u.%03uMPa\n",
+                   (unsigned int)(pressure_mpa1000 / 1000U),
+                   (unsigned int)(pressure_mpa1000 % 1000U));
+    }
+    else
+    {
+        rt_kprintf(" pressure=invalid\n");
+    }
+    rt_kprintf("  ntc1: temp=%s%u.%uC limit=%d.%dC warmup=%s\n",
                (temperature < 0) ? "-" : "",
                (unsigned int)(absolute_temperature / 10U),
                (unsigned int)(absolute_temperature % 10U),
                (int)(snapshot->target_temperature_deg10 / 10),
                (int)(snapshot->target_temperature_deg10 % 10),
                snapshot->warmup_complete ? "yes" : "no");
-    rt_kprintf("  sufficient=%s low=%s block=0x%08x\n",
+    rt_kprintf("  sufficient=%s low=%s overpressure=%s block=0x%08x\n",
                snapshot->refrigerant_sufficient ? "yes" : "no",
                snapshot->refrigerant_low ? "yes" : "no",
+               (snapshot->block_reason &
+                COOLING_PRESSURE_BLOCK_OVERPRESSURE) ? "yes" : "no",
                (unsigned int)snapshot->block_reason);
 }
 

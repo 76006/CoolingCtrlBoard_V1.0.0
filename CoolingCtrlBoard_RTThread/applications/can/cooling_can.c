@@ -59,18 +59,17 @@ static void can_send_handshake(void)
 
 static uint8_t can_refrigerant_level(const cooling_pressure_snapshot_t *p)
 {
-    if (!p->tank_present)
+    if (!p->tank_present || p->refrigerant_low)
     {
         return COOLING_CAN_REFRIGERANT_NONE;
     }
-    if (p->state == COOLING_PRESSURE_STATE_HEATING)
-    {
-        return COOLING_CAN_REFRIGERANT_CHARGING;
-    }
-    if ((p->state == COOLING_PRESSURE_STATE_HOLD) &&
-        p->refrigerant_sufficient)
+    if (p->refrigerant_sufficient)
     {
         return COOLING_CAN_REFRIGERANT_SUFFICIENT;
+    }
+    if (p->state == COOLING_PRESSURE_STATE_HEATING)
+    {
+        return COOLING_CAN_REFRIGERANT_PREHEATING;
     }
     return COOLING_CAN_REFRIGERANT_NONE;
 }
@@ -106,6 +105,14 @@ static void can_handle_power(const can_frame_t *frame)
 {
     if (frame->data[0] == COOLING_CAN_POWER_ON)
     {
+        cooling_safety_snapshot_t safety;
+
+        cooling_safety_get_snapshot(&safety);
+        if (!safety.power_on)
+        {
+            /* 新一轮开机默认启动自动加热；重复广播不覆盖手动关闭。 */
+            cooling_safety_set_auto_control(RT_TRUE);
+        }
         cooling_safety_set_power(RT_TRUE);
         rt_sem_release(&can_status_wakeup);
         can_send_handshake();

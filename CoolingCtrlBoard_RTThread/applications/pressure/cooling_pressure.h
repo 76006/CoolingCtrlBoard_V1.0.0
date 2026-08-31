@@ -29,6 +29,7 @@ typedef enum
 #define COOLING_PRESSURE_BLOCK_NO_TANK          (1UL << 5)
 #define COOLING_PRESSURE_BLOCK_ADC_INVALID      (1UL << 6)
 #define COOLING_PRESSURE_BLOCK_TEMP_INVALID     (1UL << 7)
+#define COOLING_PRESSURE_BLOCK_OVERPRESSURE     (1UL << 8)
 
 /* 供 CAN 等上层任务读取的压力控制快照。 */
 typedef struct
@@ -40,7 +41,7 @@ typedef struct
     rt_uint16_t millivolts;             /* 换算毫伏值 */
     rt_bool_t adc_valid;                /* 有效位 + 新鲜度 + 合理范围 */
     rt_int16_t temperature_deg10;       /* NTC1 当前温度，0.1 摄氏度 */
-    rt_int16_t target_temperature_deg10;/* 当前目标温度，0.1 摄氏度 */
+    rt_int16_t target_temperature_deg10;/* 当前温度上限，0.1 摄氏度 */
     rt_bool_t temperature_valid;        /* NTC1 有效位 + 新鲜度 + 温阻表 */
     rt_bool_t warmup_complete;          /* 本轮已经到达过升温目标 */
     rt_bool_t tank_present;             /* 统一安全快照中的罐体存在状态 */

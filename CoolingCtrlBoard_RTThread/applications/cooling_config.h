@@ -43,10 +43,15 @@
 #define COOLING_NTC_SUPPLY_MV                     3000U
 #define COOLING_NTC_PULLUP_OHM                    10000U
 
-/* PM13V 理论换算：0 MPa 对应 ADC 0，2.000 MPa 对应 ADC 3131。 */
+/*
+ * 压力传感器：0.5--4.5 V 对应 0--1.600 MPa。
+ * 板上调理电路理论增益为 72/157；ADC 参考电压为 3.0 V，
+ * 因而零点约为 ADC 313，满量程约为 ADC 2817。
+ */
 #define COOLING_PRESSURE_CALIBRATED               1U
-#define COOLING_PRESSURE_ADC_FULL                 3131U
-#define COOLING_PRESSURE_FULL_MPA1000             2000U
+#define COOLING_PRESSURE_ADC_ZERO                  313U
+#define COOLING_PRESSURE_ADC_FULL                 2817U
+#define COOLING_PRESSURE_FULL_MPA1000             1600U
 
 /* ---------------------------------------------------------------------
  * 冷媒压力加热控制配置（方案 A：GPIO 软件 PWM + 分阶段加热控制）
@@ -56,26 +61,61 @@
 #define COOLING_PRESSURE_CONTROL_PERIOD_MS      50U
 #define COOLING_PRESSURE_PWM_WINDOW_MS          1000U
 
-/* 温度单位为 0.1 摄氏度；滞回 10 表示目标上下各 1.0 摄氏度。 */
+/* 收到加热开启命令后，先用满功率完成一次 60 摄氏度升温。 */
 #define COOLING_WARMUP_TARGET_TEMP_DEG10          600
 #define COOLING_WARMUP_TEMP_HYSTERESIS_DEG10       10
-#define COOLING_HOLD_TARGET_TEMP_DEG10            400
-#define COOLING_HOLD_TEMP_HYSTERESIS_DEG10         10
-
-/* 升到目标温度使用满功率，升温目标/40 摄氏度保温使用低功率软件 PWM。 */
 #define COOLING_WARMUP_DUTY_PERCENT              100U
 #define COOLING_WARMUP_HOLD_DUTY_PERCENT          50U
-#define COOLING_FINAL_HOLD_DUTY_PERCENT           35U
 
-/* 压力达到 0.650 MPa 后，从升温目标切换到 40 摄氏度保温。 */
-#define COOLING_PRESSURE_TARGET_MPA1000           650U
-#define COOLING_PRESSURE_TARGET_ADC                \
-    ((COOLING_PRESSURE_TARGET_MPA1000 * COOLING_PRESSURE_ADC_FULL +       \
-      (COOLING_PRESSURE_FULL_MPA1000 / 2U)) /                             \
-     COOLING_PRESSURE_FULL_MPA1000)
+/* 目标工作带为 0.800--0.850 MPa，中心值约为 0.825 MPa。 */
+#define COOLING_PRESSURE_TARGET_MPA1000           825U
 
-/* 压力连续达到目标并保持该时间后，才确认“冷媒充足”。 */
-#define COOLING_PRESSURE_CONFIRM_TIME_MS        1000U
+/*
+ * 一次性升温完成后，仅按压力分配功率：低压快速补压，接近目标时
+ * 逐步降低功率。压力降到 0.800 MPa 后恢复补压，在 0.830 MPa
+ * 提前停热，为关断后的惯性升压留出到 0.850 MPa 的余量。
+ */
+#define COOLING_PRESSURE_FAST_END_MPA1000         750U
+#define COOLING_PRESSURE_REHEAT_MPA1000           800U /* 首次进入保持/回落补压 */
+#define COOLING_PRESSURE_SLOW_START_MPA1000       820U
+#define COOLING_PRESSURE_CONTROL_HIGH_MPA1000     830U
+#define COOLING_PRESSURE_FAST_DUTY_PERCENT         30U
+#define COOLING_PRESSURE_MEDIUM_DUTY_PERCENT       20U
+#define COOLING_PRESSURE_SLOW_DUTY_PERCENT         10U
+
+#define COOLING_PRESSURE_FAST_END_ADC               \
+    (COOLING_PRESSURE_ADC_ZERO +                                        \
+     ((COOLING_PRESSURE_FAST_END_MPA1000 *                              \
+       (COOLING_PRESSURE_ADC_FULL - COOLING_PRESSURE_ADC_ZERO) +         \
+       (COOLING_PRESSURE_FULL_MPA1000 / 2U)) /                             \
+      COOLING_PRESSURE_FULL_MPA1000))
+#define COOLING_PRESSURE_REHEAT_ADC                 \
+    (COOLING_PRESSURE_ADC_ZERO +                                        \
+     ((COOLING_PRESSURE_REHEAT_MPA1000 *                                \
+       (COOLING_PRESSURE_ADC_FULL - COOLING_PRESSURE_ADC_ZERO) +         \
+       (COOLING_PRESSURE_FULL_MPA1000 / 2U)) /                             \
+      COOLING_PRESSURE_FULL_MPA1000))
+#define COOLING_PRESSURE_SLOW_START_ADC             \
+    (COOLING_PRESSURE_ADC_ZERO +                                        \
+     ((COOLING_PRESSURE_SLOW_START_MPA1000 *                            \
+       (COOLING_PRESSURE_ADC_FULL - COOLING_PRESSURE_ADC_ZERO) +         \
+       (COOLING_PRESSURE_FULL_MPA1000 / 2U)) /                             \
+      COOLING_PRESSURE_FULL_MPA1000))
+#define COOLING_PRESSURE_CONTROL_HIGH_ADC            \
+    (COOLING_PRESSURE_ADC_ZERO +                                        \
+     ((COOLING_PRESSURE_CONTROL_HIGH_MPA1000 *                          \
+       (COOLING_PRESSURE_ADC_FULL - COOLING_PRESSURE_ADC_ZERO) +         \
+       (COOLING_PRESSURE_FULL_MPA1000 / 2U)) /                             \
+      COOLING_PRESSURE_FULL_MPA1000))
+
+/* 正常控制在 0.830 MPa 停热；压力达到 0.900 MPa 才锁存故障。 */
+#define COOLING_PRESSURE_CUTOFF_MPA1000           900U
+#define COOLING_PRESSURE_CUTOFF_ADC                \
+    (COOLING_PRESSURE_ADC_ZERO +                                        \
+     ((COOLING_PRESSURE_CUTOFF_MPA1000 *                                \
+       (COOLING_PRESSURE_ADC_FULL - COOLING_PRESSURE_ADC_ZERO) +         \
+       (COOLING_PRESSURE_FULL_MPA1000 / 2U)) /                             \
+      COOLING_PRESSURE_FULL_MPA1000))
 
 /* 升压总时长超过该值仍未达标，判定冷媒不足并锁存到拔罐。 */
 #define COOLING_PRESSURE_MAX_BOOST_TIME_MS      300000U
