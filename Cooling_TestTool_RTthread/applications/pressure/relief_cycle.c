@@ -10,13 +10,16 @@ static int in_range(int32_t value, int32_t lo, int32_t hi)
     return value >= lo && value <= hi;
 }
 
-const char *relief_validate(const relief_config_t *c, int32_t hard_p)
+const char *relief_validate(const relief_config_t *c, int32_t hard_p, int32_t hard_t)
 {
     if (!c || hard_p < 2 || c->max_p < 1 || c->max_p >= hard_p)
         return "MAX_P";
-    if (!in_range(c->tolerance, 1, 999) || c->tolerance >= c->max_p)
+    if (!in_range(c->max_t, 1, hard_t)) return "MAX_TEMP";
+    if (!in_range(c->full_power, 0, 1)) return "HEAT_MODE";
+    if (c->manual) return NULL;
+    if (!in_range(c->tolerance, 1, 999))
         return "TOLERANCE";
-    if (c->initial_p < -1 || c->initial_p >= c->max_p - c->tolerance)
+    if (c->initial_p < -1 || c->initial_p >= hard_p)
         return "INITIAL_P";
     if (!in_range(c->window, 1, 100)) return "WINDOW";
     if (!in_range(c->drop, 1, 1000)) return "DROP";
@@ -33,14 +36,14 @@ const char *relief_validate(const relief_config_t *c, int32_t hard_p)
 const char *relief_state_name(relief_state_t state)
 {
     static const char *const names[] = {
-        "IDLE", "BASE", "HEAT", "LIMIT", "CHECK", "VENT", "RETURN", "DONE", "ABORT"
+        "IDLE", "HEAT", "LIMIT", "CHECK", "VENT", "RETURN", "MANUAL", "DONE", "ABORT"
     };
     return (unsigned)state < sizeof(names)/sizeof(names[0]) ? names[state] : "UNKNOWN";
 }
 
 int relief_active(const relief_cycle_t *cycle)
 {
-    return cycle->state >= RELIEF_BASE && cycle->state <= RELIEF_RETURN;
+    return cycle->state >= RELIEF_HEAT && cycle->state <= RELIEF_MANUAL;
 }
 
 void relief_begin(relief_cycle_t *c, const relief_config_t *cfg,
@@ -51,8 +54,8 @@ void relief_begin(relief_cycle_t *c, const relief_config_t *cfg,
     c->cfg = config;
     c->emit = emit;
     c->context = context;
-    c->state = RELIEF_BASE;
-    c->round = 1;
+    c->state = config.manual ? RELIEF_MANUAL : RELIEF_HEAT;
+    c->round = config.manual ? 0 : 1;
     c->round_ms = now_ms;
 }
 
@@ -94,7 +97,7 @@ static int elapsed(uint32_t now, uint32_t since, int32_t duration)
 
 /* Keep the newest reference at or before the window boundary, plus every
  * newer point. At 100 ms sampling the longest supported window is 10 s. */
-static int remember_temperature(relief_cycle_t *c, int16_t *reference)
+static int16_t remember_temperature(relief_cycle_t *c)
 {
     unsigned next, tail;
     while (c->count > 1)
@@ -113,15 +116,13 @@ static int remember_temperature(relief_cycle_t *c, int16_t *reference)
     c->history_t0[tail] = c->last.t0;
     c->history_ms[tail] = c->last.ms;
     ++c->count;
-    *reference = c->history_t0[c->head];
-    return elapsed(c->last.ms, c->history_ms[c->head], c->cfg.window);
+    return c->history_t0[c->head];
 }
 
 static void reset_temperature_window(relief_cycle_t *c)
 {
-    int16_t ignored;
     c->head = c->count = 0;
-    (void)remember_temperature(c, &ignored);
+    (void)remember_temperature(c);
 }
 
 static int in_baseline_band(const relief_cycle_t *c, int32_t target)
@@ -143,36 +144,6 @@ static int sustained(relief_cycle_t *c, int condition, int32_t duration)
         c->hold_ms = c->last.ms;
     }
     return elapsed(c->last.ms, c->hold_ms, duration);
-}
-
-static int baseline_ready(relief_cycle_t *c, int window_full)
-{
-    uint16_t p = c->last.p;
-    if (c->cfg.initial_p >= 0)
-    {
-        c->initial_p = (uint16_t)c->cfg.initial_p;
-        return sustained(c, in_baseline_band(c, c->initial_p), c->cfg.stable)
-               && window_full;
-    }
-    /* A longer temperature warm-up must not dilute the requested baseline
-     * average with pressure values predating the stability period. */
-    if (!window_full && c->cfg.window > c->cfg.stable &&
-        !elapsed(c->last.ms, c->history_ms[c->head], c->cfg.window - c->cfg.stable))
-        return 0;
-    if (!c->base_count || (int32_t)p > c->base_min + c->cfg.tolerance ||
-        (int32_t)p < c->base_max - c->cfg.tolerance)
-    {
-        c->base_min = c->base_max = p;
-        c->hold_ms = c->last.ms;
-        c->base_count = c->base_sum = 0;
-    }
-    if (p < c->base_min) c->base_min = p;
-    if (p > c->base_max) c->base_max = p;
-    ++c->base_count;
-    c->base_sum += p;
-    if (!window_full || !elapsed(c->last.ms, c->hold_ms, c->cfg.stable)) return 0;
-    c->initial_p = (uint16_t)((c->base_sum + c->base_count / 2U) / c->base_count);
-    return 1;
 }
 
 static void mark_limit(relief_cycle_t *c)
@@ -210,7 +181,8 @@ static void begin_candidate(relief_cycle_t *c, int16_t reference)
 void relief_step(relief_cycle_t *c, const relief_sample_t *sample)
 {
     int16_t reference;
-    int full_window, dropped;
+    int first_sample = !c->seen_sample;
+    int dropped;
     uint16_t current_p;
     if (!relief_active(c)) return;
     if (c->seen_sample && sample->seq == c->last.seq) return;
@@ -225,33 +197,34 @@ void relief_step(relief_cycle_t *c, const relief_sample_t *sample)
     c->seen_sample = 1;
     current_p = sample->raw_p > sample->p ? sample->raw_p : sample->p;
     if (current_p > c->peak) c->peak = current_p;
+    if (c->state == RELIEF_MANUAL)
+    {
+        if (current_p >= c->cfg.max_p)
+            relief_abort(c, "MAX_PRESSURE", sample->ms, sample);
+        return;
+    }
+    reference = remember_temperature(c);
+    if (first_sample)
+    {
+        /* Store the return reference while starting the first heating cycle. */
+        relief_sample_t base = *sample;
+        c->initial_p = c->cfg.initial_p < 0 ? sample->p : (uint16_t)c->cfg.initial_p;
+        base.p = c->initial_p;
+        report(c, "BASE", &base, c->peak);
+        begin_round(c, current_p);
+        return;
+    }
     if (elapsed(sample->ms, c->round_ms, c->cfg.timeout))
     {
         relief_abort(c, "TIMEOUT", sample->ms, sample);
         return;
     }
-    full_window = remember_temperature(c, &reference);
     dropped = reference - sample->t0 >= c->cfg.drop;
-    if (c->state != RELIEF_BASE && !c->limit_seen && current_p >= c->cfg.max_p)
+    if (!c->limit_seen && current_p >= c->cfg.max_p)
         mark_limit(c);
 
     switch (c->state)
     {
-    case RELIEF_BASE:
-        if (!baseline_ready(c, full_window)) break;
-        if (c->initial_p + c->cfg.tolerance >= c->cfg.max_p)
-        {
-            relief_abort(c, "BAD_BASE", sample->ms, sample);
-            break;
-        }
-        {
-            relief_sample_t base = *sample;
-            base.p = c->initial_p;
-            report(c, "BASE", &base, c->peak);
-        }
-        begin_round(c, current_p);
-        if (dropped) begin_candidate(c, reference);
-        break;
     case RELIEF_LIMIT:
         /* A trigger arriving exactly at the observation deadline is in time. */
         if (sample->ms - c->limit_ms > (uint32_t)c->cfg.observe * 100U)

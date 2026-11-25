@@ -1,5 +1,6 @@
 #include "../mainwindow.h"
 #include <QApplication>
+#include <QComboBox>
 #include <QDirIterator>
 #include <QElapsedTimer>
 #include <QFile>
@@ -78,10 +79,10 @@ int main(int argc, char **argv)
         station.show();
         pump();
         require(board.sent.contains("rc hello"), "opening link did not request handshake");
-        board.feed("boot ready\r\nmsh >@R,H,1,1400,0,IDLE\r\n");
+        board.feed("boot ready\r\nmsh >@R,H,2,1400,700,0,IDLE\r\n");
         pump();
         const QStringList fields = {"1.000", "", "0.020", "1.0", "1.0", "0.3",
-                                    "0.5", "0.2", "0.5", "5.0", "60.0", "2"};
+                                    "0.5", "0.2", "0.5", "5.0", "60.0", "2", "55.0"};
         for (int index = 0; index < fields.size(); ++index) {
             auto *field = station.findChild<QLineEdit *>(QString("cfg%1").arg(index));
             require(field, "missing test setting");
@@ -90,6 +91,9 @@ int main(int argc, char **argv)
         auto *folder = station.findChild<QLineEdit *>("saveDirectory");
         auto *start = station.findChild<QPushButton *>("startButton");
         require(folder && start, "missing save/start controls");
+        auto *mode = station.findChild<QComboBox *>("heatingMode");
+        require(mode && !mode->currentData().toBool(), "PWM must be the initial mode");
+        mode->setCurrentIndex(mode->findData(true));
         folder->setText(directory.path());
         pump();
         require(start->isEnabled(), "start disabled after handshake and valid settings");
@@ -100,7 +104,7 @@ int main(int argc, char **argv)
         require(match.hasMatch(), "no configuration sent");
         const auto run = match.captured(1).toLatin1();
         const auto cfg = match.captured(2).toLatin1();
-        require(cfg == "1000,-1,20,10,10,3,5,2,5,50,600,2", "parameter order or scaling mismatch");
+        require(cfg == "1000,-1,20,10,10,3,5,2,5,50,600,2,550,1", "parameter order, scaling or full-power mode mismatch");
         require(!board.sent.contains("rc start"), "start sent before board accepted config");
         board.feed("@R,C," + run + "," + cfg + "\r\n");
         pump();

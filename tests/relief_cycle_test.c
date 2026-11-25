@@ -37,7 +37,7 @@ static const relief_event_t *event_at(const char *kind, unsigned occurrence)
 
 static void prepare(void)
 {
-    const relief_config_t config = {900, -1, 5, 2, 10, 2, 5, 2, 2, 3, 100, 1};
+    const relief_config_t config = {900, -1, 5, 2, 10, 2, 5, 2, 2, 3, 100, 1, 700, 0, 0};
     cfg = config;
     memset(&sample, 0, sizeof(sample));
     sample.valid = 7;
@@ -47,9 +47,9 @@ static void prepare(void)
 
 static void begin(void)
 {
-    assert(!relief_validate(&cfg, 1400));
+    assert(!relief_validate(&cfg, 1400, 700));
     relief_begin(&cycle, &cfg, sample.ms, record, &events);
-    assert(cycle.state == RELIEF_BASE);
+    assert(cycle.state == RELIEF_HEAT);
 }
 
 static void point_raw(unsigned p, unsigned raw, int t0)
@@ -69,8 +69,6 @@ static void point(unsigned p, int t0)
 
 static void baseline(void)
 {
-    point(299, 250);
-    point(301, 250);
     point(300, 250);
     assert(cycle.state == RELIEF_HEAT && cycle.initial_p == 300);
 }
@@ -155,8 +153,10 @@ static void test_bad_runs(void)
     point(850, 250); point(820, 250); point(790, 250);
     assert(cycle.state == RELIEF_ABORT && count("NO_RELIEF") == 1);
     assert(event_at("NO_RELIEF", 1)->state == RELIEF_LIMIT);
-    prepare(); begin(); point(897, 250); point(897, 250); point(897, 250);
-    assert(cycle.state == RELIEF_ABORT && count("BAD_BASE") == 1);
+    prepare(); begin(); point(897, 250);
+    assert(cycle.state == RELIEF_HEAT && cycle.initial_p == 897);
+    prepare(); begin(); point_raw(895, 900, 250);
+    assert(cycle.state == RELIEF_LIMIT && !count("HEAT"));
     prepare(); cfg.timeout = 5; begin(); baseline();
     point(320, 250); point(330, 250); point(340, 250);
     point(350, 250); point(360, 250);
@@ -195,12 +195,11 @@ static void test_temperature_window_spans_round_transition(void)
 static void test_baseline_and_faults(void)
 {
     unsigned i;
-    prepare(); cfg.initial_p = 300; begin();
-    point(302, 250); point(340, 250); point(301, 250); point(303, 250);
+    prepare(); cfg.initial_p = 300; cfg.stable = 600; begin();
+    point(840, 250);
     for (i = 0; i < 10; ++i)
         relief_step(&cycle, &sample);
-    assert(cycle.state == RELIEF_BASE);
-    point(305, 250);
+    assert(count("HEAT") == 1);
     assert(cycle.state == RELIEF_HEAT && cycle.initial_p == 300);
     sample.valid = 6; point(350, 100);
     assert(cycle.state == RELIEF_ABORT && count("SENSOR") == 1);
@@ -214,10 +213,10 @@ static void test_baseline_and_faults(void)
     prepare(); begin(); baseline();
     relief_abort(&cycle, "INTERLOCK", sample.ms, &sample);
     assert(cycle.state == RELIEF_ABORT && count("INTERLOCK") == 1);
-    prepare(); cfg.window = 101; assert(relief_validate(&cfg, 1400));
-    prepare(); cfg.max_p = 1400; assert(relief_validate(&cfg, 1400));
-    prepare(); cfg.initial_p = 895; assert(relief_validate(&cfg, 1400));
-    prepare(); cfg.initial_p = -2; assert(relief_validate(&cfg, 1400));
+    prepare(); cfg.window = 101; assert(relief_validate(&cfg, 1400, 700));
+    prepare(); cfg.max_p = 1400; assert(relief_validate(&cfg, 1400, 700));
+    prepare(); cfg.initial_p = 895; assert(!relief_validate(&cfg, 1400, 700));
+    prepare(); cfg.initial_p = -2; assert(relief_validate(&cfg, 1400, 700));
 }
 
 static void test_long_window_and_sample_integrity(void)
@@ -229,7 +228,7 @@ static void test_long_window_and_sample_integrity(void)
     for (i = 0; i < 100; ++i)
     {
         point(300, 260);
-        assert(cycle.state == RELIEF_BASE);
+        assert(cycle.state == RELIEF_HEAT);
     }
     point(300, 260);
     assert(cycle.state == RELIEF_HEAT);
@@ -253,15 +252,13 @@ static void test_long_window_and_sample_integrity(void)
     assert(cycle.state == RELIEF_CHECK && count("TRIGGER") == 1);
 }
 
-static void test_initial_average_uses_stability_period(void)
+static void test_start_records_first_pressure(void)
 {
-    unsigned i;
-    prepare(); cfg.window = 10; cfg.stable = 2;
-    begin();
-    for (i = 0; i < 8; ++i) point(300, 249);
-    point(305, 249); point(305, 249); point(305, 249);
-    assert(cycle.state == RELIEF_HEAT);
-    assert(cycle.initial_p == 305 && event_at("BASE",1)->sample.p == 305);
+    prepare(); cfg.window = 100; cfg.stable = 600; cfg.tolerance = 1;
+    begin(); point(843, 249);
+    assert(cycle.state == RELIEF_HEAT && count("HEAT") == 1);
+    point(840, 249);
+    assert(cycle.initial_p == 843 && event_at("BASE", 1)->sample.p == 843);
 }
 
 int main(void)
@@ -273,7 +270,7 @@ int main(void)
     test_temperature_window_spans_round_transition();
     test_baseline_and_faults();
     test_long_window_and_sample_integrity();
-    test_initial_average_uses_stability_period();
+    test_start_records_first_pressure();
     puts("Relief cycle replay passed");
     return 0;
 }

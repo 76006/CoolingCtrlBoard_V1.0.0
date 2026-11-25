@@ -47,6 +47,10 @@ rt_err_t cooling_adc_start(void);
  */
 void cooling_adc_get_snapshot(cooling_adc_snapshot_t *snapshot);
 
+/* 根据调理电路增益还原压力传感器输出电压（mV）。 */
+uint16_t cooling_pressure_sensor_mv(uint16_t adc);
+/* 将量程内的压力（0.001 MPa）反算为控制阈值的 ADC 码。 */
+uint16_t cooling_pressure_adc_from_mpa1000(uint16_t pressure_mpa1000);
 /* 滤波 ADC 值换算为 0.001 MPa；未标定时返回 -1。 */
 int cooling_sensor_pressure_mpa1000(uint16_t filtered_adc,
                                     uint16_t *pressure_mpa1000);

@@ -4,6 +4,7 @@
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDateTime>
+#include <QDialog>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -58,6 +59,7 @@ void MainWindow::buildUi()
     bar->addWidget(connectButton); bar->addWidget(connection); bar->addStretch();
     recoverButton=new QPushButton(tr("接收遗留记录")); recoverButton->setVisible(false);
     startButton=new QPushButton(tr("开始试验")); startButton->setObjectName("startButton");
+    manualButton=new QPushButton(tr("手动开启加热")); manualButton->setObjectName("manualHeatButton");
     stopButton=new QPushButton(tr("停止试验")); stopButton->setObjectName("stopButton");
     setStyleSheet(QStringLiteral(
         "QMainWindow{background:#f5f7f8;color:#233643}"
@@ -69,27 +71,34 @@ void MainWindow::buildUi()
         "QPushButton#stopButton:enabled{color:#932e26;border:1px solid #be796e;"
         "background:#fff7f4;border-radius:4px}QLabel#stateLabel{font-weight:bold;color:#174b62}"
         "QTableWidget{alternate-background-color:#f4f8f9;gridline-color:#dbe3e6}"));
-    bar->addWidget(recoverButton); bar->addWidget(startButton); bar->addWidget(stopButton);
+    bar->addWidget(recoverButton); bar->addWidget(manualButton); bar->addWidget(startButton); bar->addWidget(stopButton);
     page->addLayout(bar);
     auto *body=new QHBoxLayout; page->addLayout(body,1);
     auto *scroll=new QScrollArea; scroll->setWidgetResizable(true); scroll->setFrameShape(QFrame::NoFrame);
     scroll->setMinimumWidth(270); scroll->setMaximumWidth(325); body->addWidget(scroll);
     form=new QWidget; auto *left=new QVBoxLayout(form); left->setContentsMargins(0,0,7,0);
-    QFormLayout *rows=nullptr;
+    QFormLayout *rows=nullptr, *limits=nullptr;
     for (int i=0;i<int(fields.size());++i) {
         if (i==0 || i==3 || i==8) {
-            auto *g=new QGroupBox(i==0?tr("压力"):i==3?tr("泄压口 NTC0"):tr("时限与轮次"));
+            auto *g=new QGroupBox(i==0?tr("压力与温度上限"):i==3?tr("泄压口 NTC0"):tr("时限与轮次"));
             rows=new QFormLayout(g); left->addWidget(g);
+            if (i==0) limits=rows;
         }
         const auto &s=Protocol::settings[i];
         QString key="cfg"+QString::number(i);
         auto *f=new QLineEdit(prefs.value(key,QString::fromLatin1(s.initial)).toString());
         fields[i]=f; f->setObjectName(key); f->setMaximumWidth(112);
         QString range=QString("%1–%2").arg(s.low/double(s.scale)).arg(s.high/double(s.scale));
-        f->setPlaceholderText(i==1?tr("自动实测"):range);
+        f->setPlaceholderText(i==1?tr("用首个采样值"):range);
         f->setToolTip(range+" "+QString::fromUtf8(s.unit));
-        rows->addRow(QString::fromUtf8(s.label)+" ("+QString::fromUtf8(s.unit)+")",f);
+        (i==Protocol::MaxTemperatureField ? limits : rows)->addRow(QString::fromUtf8(s.label)+" ("+QString::fromUtf8(s.unit)+")",f);
     }
+    heatingMode=new QComboBox;
+    heatingMode->setObjectName("heatingMode");
+    heatingMode->addItem(tr("分段 PWM 调温"), false);
+    heatingMode->addItem(tr("满功率调温"), true);
+    heatingMode->setCurrentIndex(heatingMode->findData(prefs.value("fullPower",false).toBool()));
+    limits->insertRow(0,tr("调温方式"),heatingMode);
     auto *dest=new QGroupBox(tr("试验保存位置")); auto *dst=new QVBoxLayout(dest);
     saveDirectory=new QLineEdit(prefs.value("directory",QDir(
         QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath("CoolingRelief")).toString());
@@ -105,6 +114,11 @@ void MainWindow::buildUi()
     values=new QLabel(tr("压力 — MPa      NTC0 — ℃      NTC1 — ℃"));
     auto *metrics=new QHBoxLayout; metrics->addWidget(stateLabel); metrics->addStretch();
     metrics->addWidget(values); right->addLayout(metrics);
+    monitorButton=new QPushButton(tr("实时观察…"));
+    monitorButton->setObjectName("monitorButton");
+    monitorButton->setToolTip(tr("独立查看设备实时曲线，可在试验前后使用"));
+    metrics->addWidget(monitorButton);
+    connect(monitorButton,&QPushButton::clicked,this,&MainWindow::openMonitor);
     auto *split=new QSplitter(Qt::Vertical);
     plot=new CurvePlot; split->addWidget(plot);
     auto *events=new QWidget; auto *eventLayout=new QVBoxLayout(events);
@@ -132,22 +146,71 @@ void MainWindow::buildUi()
             disconnectLink(tr("已断开串口"));
         } else openLink();
     });
-    connect(startButton,&QPushButton::clicked,this,&MainWindow::begin);
+    connect(startButton,&QPushButton::clicked,this,[this] { begin(false); });
+    connect(manualButton,&QPushButton::clicked,this,[this] {
+        if (stage==Stage::Idle || stage==Stage::Finished) begin(true);
+        else if (manualRun) requestStop();
+    });
     connect(stopButton,&QPushButton::clicked,this,&MainWindow::requestStop);
     connect(exportButton,&QPushButton::clicked,this,&MainWindow::exportPlot);
+    connect(plot,&CurvePlot::selectionChanged,this,&MainWindow::updateControls);
     connect(recoverButton,&QPushButton::clicked,this,&MainWindow::recoverForeign);
 }
 void MainWindow::showMessage(const QString &m) { info->setText(m); }
+void MainWindow::openMonitor()
+{
+    if (!online || !greeted) return;
+    if (!monitorWindow) {
+        monitorWindow=new QDialog(this);
+        monitorWindow->setWindowFlag(Qt::WindowMaximizeButtonHint);
+        monitorWindow->resize(880,480);
+        auto *layout=new QVBoxLayout(monitorWindow);
+        monitorPlot=new CurvePlot(monitorWindow);
+        layout->addWidget(monitorPlot,1);
+        saveObservation=new QPushButton(tr("保存观察曲线 PNG…"),monitorWindow);
+        layout->addWidget(saveObservation,0,Qt::AlignRight);
+        connect(monitorPlot,&CurvePlot::selectionChanged,this,[this] {
+            saveObservation->setEnabled(monitorPlot->canExportSelection());
+        });
+        connect(saveObservation,&QPushButton::clicked,this,[this] {
+            auto *file=new QFileDialog(monitorWindow,tr("保存本次观察曲线"),
+                QDir(saveDirectory->text()).filePath("observation.png"),tr("PNG 图像 (*.png)"));
+            file->setAttribute(Qt::WA_DeleteOnClose);
+            file->setAcceptMode(QFileDialog::AcceptSave);
+            file->setDefaultSuffix("png");
+            connect(file,&QFileDialog::fileSelected,this,[this](const QString &path) {
+                showMessage(monitorPlot->savePng(path) ? tr("观察曲线已保存到 ")+path : tr("无法保存观察曲线到 ")+path);
+            });
+            file->open();
+        });
+    }
+    if (!monitorWindow->isVisible()) {
+        monitorPlot->clear();
+        monitorLastMs.reset();
+        saveObservation->setEnabled(false);
+        monitorWindow->setWindowTitle(tr("实时观察"));
+        monitorWindow->show();
+    } else if (monitorWindow->isMinimized()) {
+        monitorWindow->showNormal();
+    }
+    monitorWindow->raise();
+    monitorWindow->activateWindow();
+}
 void MainWindow::updateControls()
 {
     bool idle=stage==Stage::Idle || stage==Stage::Finished;
     connectButton->setText(online?tr("断开"):tr("连接"));
     ports->setEnabled(!online); refreshButton->setEnabled(!online);
     form->setEnabled(idle || stage==Stage::Foreign);
+    bool manualActive=manualRun && (stage==Stage::Configure || stage==Stage::Start || stage==Stage::Running);
+    manualButton->setText(manualRun && stage==Stage::Stopping ? tr("正在关闭加热") :
+                          manualActive ? tr("关闭手动加热") : tr("手动开启加热"));
+    manualButton->setEnabled(online && greeted && (idle || manualActive));
     startButton->setEnabled(online && greeted && idle);
+    monitorButton->setEnabled(online && greeted);
     stopButton->setEnabled(online && greeted && !idle);
     recoverButton->setVisible(online && greeted && stage==Stage::Foreign);
-    exportButton->setEnabled(stage==Stage::Finished && !archive.directory.isEmpty() && lastSequence.has_value());
+    exportButton->setEnabled(stage==Stage::Finished && !archive.directory.isEmpty() && plot->canExportSelection());
 }
 void MainWindow::refreshPorts()
 {
@@ -170,6 +233,7 @@ void MainWindow::openLink()
 }
 void MainWindow::connected()
 {
+    temperatureHoldRun=0;
     online=true; greeted=false; retries=0; buffer.clear(); replyAge.start(); phaseAge.start();
     connection->setText(tr("握手中")); send("rc hello"); updateControls();
 }
@@ -181,6 +245,7 @@ void MainWindow::disconnectLink(const QString &reason)
         archive.note(reason); stage=Stage::Interrupted;
     }
     connection->setText(tr("未连接"));
+    if (monitorWindow) monitorWindow->setWindowTitle(tr("实时观察 · 已断开"));
     showMessage(reason+(stage==Stage::Interrupted ? tr("；试验通信中断，重新连接后可收取剩余事件。") : QString()));
     updateControls();
 }
@@ -204,18 +269,19 @@ void MainWindow::readIncoming()
     if (buffer.size()>2048) buffer.clear();
 }
 
-bool MainWindow::config(QByteArray &cfg, QString &error) const
+bool MainWindow::config(bool manual, QByteArray &cfg, QString &error) const
 {
     QList<QByteArray> encoded;
-    int raw[12]={};
-    for (int i=0;i<12;++i) {
+    for (int i=0;i<Protocol::SettingCount;++i) {
+        if (manual && i!=0 && i!=Protocol::MaxTemperatureField) continue;
         const auto &s=Protocol::settings[i];
         QString input=fields[i]->text().trimmed();
         int digits=s.scale==1000?3:s.scale==10?1:0;
-        int upper=i==0 || i==1 ? hardLimit-1 : s.high;
+        int upper=i==0 || i==1 ? hardLimit-1 : i==Protocol::MaxTemperatureField ? hardTemperature : s.high;
         QString pattern=digits ? QStringLiteral("^[0-9]+(?:\\.[0-9]{1,%1})?$").arg(digits)
                                : QStringLiteral("^[0-9]+$");
-        if (i==1 && input.isEmpty()) raw[i]=-1;
+        int raw;
+        if (i==1 && input.isEmpty()) raw=-1;
         else {
             bool ok=false; double v=input.toDouble(&ok);
             if (!ok || !QRegularExpression(pattern).match(input).hasMatch() ||
@@ -224,27 +290,31 @@ bool MainWindow::config(QByteArray &cfg, QString &error) const
                     .arg(QString::fromUtf8(s.label)).arg(s.low/double(s.scale)).arg(upper/double(s.scale))
                     .arg(QString::fromUtf8(s.unit)).arg(digits); return false;
             }
-            raw[i]=qRound(v*s.scale);
+            raw=qRound(v*s.scale);
         }
-        encoded<<QByteArray::number(raw[i]);
+        encoded<<QByteArray::number(raw);
     }
-    if (std::max(0,raw[1])+raw[2]>=raw[0]) {
-        error=tr("初始压力加回压容差须低于最高压力。"); return false;
-    }
+    // Omitting the optional field preserves the PWM command accepted by older boards.
+    if (heatingMode->currentData().toBool()) encoded << "1";
     cfg=encoded.join(','); return true;
 }
-void MainWindow::begin()
+void MainWindow::sendConfig()
+{
+    const QByteArray command=manualRun ? "rc mcfg " : "rc cfg ";
+    send(command+QByteArray::number(run)+" "+pendingConfig);
+}
+void MainWindow::begin(bool manual)
 {
     if (!online || !greeted || !(stage==Stage::Idle || stage==Stage::Finished)) return;
     QByteArray cfg; QString err;
-    if (!config(cfg,err)) { showMessage(err); return; }
+    if (!config(manual,cfg,err)) { showMessage(err); return; }
     if (saveDirectory->text().trimmed().isEmpty()) { showMessage(tr("请选择试验保存目录。")); return; }
     if (archive.active() && run==boardRun) heartbeat();
     if (!online) return;
     quint32 nextRun;
     do { nextRun=QRandomGenerator::global()->bounded(1U,2147483648U); } while (nextRun==boardRun);
     if (!archive.create(saveDirectory->text().trimmed(),nextRun,cfg)) { showMessage(archive.error); return; }
-    run=nextRun; pendingConfig=cfg; stage=Stage::Configure; retries=0; phaseAge.restart();
+    manualRun=manual; run=nextRun; pendingConfig=cfg; stage=Stage::Configure; retries=0; phaseAge.restart();
     outcome.clear(); diskFailed=false; awaitingStop=false; recordedSampleAge.invalidate();
     plot->clear(); lastSequence.reset(); table->setRowCount(0);
     prefs.setValue("archives/"+QString::number(run),archive.directory);
@@ -253,7 +323,7 @@ void MainWindow::begin()
     prefs.setValue("directory",saveDirectory->text().trimmed());
     prefs.sync();
     stateLabel->setText(tr("提交参数")); showMessage(tr("正在核对板端接受的参数。"));
-    updateControls(); send("rc cfg "+QByteArray::number(run)+" "+cfg);
+    updateControls(); sendConfig();
 }
 void MainWindow::requestStop()
 {
@@ -315,7 +385,12 @@ void MainWindow::tick()
     }
     checkSampleDeadline();
     if (replyAge.elapsed()>3500) { disconnectLink(tr("设备通信超时")); return; }
-    if (replyAge.elapsed()>1400) send("rc hello");
+    const bool observingForeign=stage==Stage::Foreign && monitorWindow && monitorWindow->isVisible();
+    // hello keeps telemetry streaming without acknowledging events or renewing a foreign heating lease.
+    if (replyAge.elapsed()>1400 || (observingForeign && monitorHelloAge.elapsed()>=1500)) {
+        monitorHelloAge.restart();
+        send("rc hello");
+    }
     if (stage==Stage::Foreign || diskFailed) return;
     QByteArray id=QByteArray::number(run);
     if (stage==Stage::Recover) {
@@ -331,7 +406,7 @@ void MainWindow::tick()
             if (stage!=Stage::Configure) send("rc stop "+id);
             disconnectLink(tr("命令应答超时")); return;
         }
-        if (stage==Stage::Configure) send("rc cfg "+id+" "+pendingConfig);
+        if (stage==Stage::Configure) sendConfig();
         else if (stage==Stage::Start) send("rc start "+id);
         else send("rc stop "+id);
     }
@@ -341,17 +416,28 @@ void MainWindow::process(const QList<QByteArray> &f)
 {
     if (!online || f.size()<3) return;
     QByteArray type=f[1];
-    if (type=="H" && f.size()==6) {
-        quint32 version,limit,remote;
-        if (!unsignedField(f[2],version) || !unsignedField(f[3],limit) ||
-            !unsignedField(f[4],remote) || Protocol::stateName(QString::fromLatin1(f[5])).isEmpty()) return;
-        if (version!=1 || limit<2 || limit>1600) { disconnectLink(tr("试验协议版本或板端限值不兼容")); return; }
-        hardLimit=int(limit); replyAge.restart();
-        handshake(remote,QString::fromLatin1(f[5])); return;
+    if (type=="H") {
+        if (f[2]!="2") { disconnectLink(tr("请使用支持最高温度和手动加热的配套工装固件（协议 2）")); return; }
+        quint32 limit,temperatureLimit,remote;
+        if (f.size()!=7 || !unsignedField(f[3],limit) || !unsignedField(f[4],temperatureLimit) ||
+            !unsignedField(f[5],remote) || Protocol::stateName(QString::fromLatin1(f[6])).isEmpty()) return;
+        if (limit<2 || limit>1600 || !temperatureLimit || temperatureLimit>32767) {
+            disconnectLink(tr("板端温压限值无效")); return;
+        }
+        hardLimit=int(limit); hardTemperature=int(temperatureLimit); replyAge.restart();
+        handshake(remote,QString::fromLatin1(f[6])); return;
     }
     if (!greeted) return;
     quint32 id;
     if (!unsignedField(f[2],id)) return;
+    if (type=="T" && f.size()==5 && id && id==boardRun && f[4]=="HOLD") {
+        quint32 sequence;
+        if (unsignedField(f[3],sequence)) {
+            temperatureHoldRun=id;
+            temperatureHoldSequence=sequence;
+        }
+        return;
+    }
     if (type=="S" || type=="E") {
         bool event=type=="E";
         auto p=Protocol::point(f,event);
@@ -361,7 +447,14 @@ void MainWindow::process(const QList<QByteArray> &f)
             return;
         }
         replyAge.restart();
-        if (event) acceptEvent(*p); else acceptSample(*p);
+        if (event) {
+            acceptEvent(*p);
+        } else {
+            if (temperatureHoldRun && id==temperatureHoldRun && p->number==temperatureHoldSequence && p->code=="HEAT")
+                p->code=QStringLiteral("TEMP_HOLD");
+            temperatureHoldRun=0;
+            acceptSample(*p);
+        }
         return;
     }
     if (id!=run) return;
@@ -380,14 +473,24 @@ void MainWindow::process(const QList<QByteArray> &f)
         }
         phaseAge.restart(); retries=0; replyAge.restart(); updateControls(); return;
     }
-    if (type=="C" && f.size()==15 && stage==Stage::Configure) {
+    if (type=="C" && f.size()>=4 &&
+        (stage==Stage::Configure || stage==Stage::Stopping)) {
         QByteArray echoed=f.mid(3).join(',');
+        if (stage==Stage::Stopping) {
+            // OFF can be pressed before the board echoes the configuration.
+            boardRun=run;
+            send("rc stop "+QByteArray::number(run));
+            return;
+        }
         if (echoed!=pendingConfig) { fault(tr("设备回显参数不一致，已取消启动。")); return; }
         boardRun=run;
         if (!archive.note(tr("下位机已确认参数 %1").arg(QString::fromLatin1(echoed)))) {
             archiveFailure(); return;
         }
-        for (int i=0;i<12;++i) prefs.setValue("cfg"+QString::number(i),fields[i]->text().trimmed());
+        for (int i=0;i<Protocol::SettingCount;++i)
+            if (!manualRun || i==0 || i==Protocol::MaxTemperatureField)
+                prefs.setValue("cfg"+QString::number(i),fields[i]->text().trimmed());
+        prefs.setValue("fullPower",heatingMode->currentData().toBool());
         prefs.sync();
         stage=Stage::Start; phaseAge.restart(); retries=0; replyAge.restart(); recordedSampleAge.start();
         stateLabel->setText(tr("等待启动应答")); send("rc start "+QByteArray::number(run)); return;
@@ -403,6 +506,8 @@ void MainWindow::process(const QList<QByteArray> &f)
         updateControls();
     } else if (type=="X" && f.size()==4) {
         QString reason=tr("设备拒绝命令（%1）").arg(QString::fromLatin1(f[3]));
+        if (stage==Stage::Configure && f[3]=="FORMAT" && heatingMode->currentData().toBool())
+            reason=tr("设备未接受满功率参数，请确认下位机固件支持满功率调温。");
         if (stage==Stage::Configure) { fault(reason); send("rc hello"); }
         else if (stage==Stage::Start) { requestStop(); showMessage(reason+tr("，已请求停热。")); }
         else showMessage(reason);
@@ -411,13 +516,23 @@ void MainWindow::process(const QList<QByteArray> &f)
 void MainWindow::handshake(quint32 remote, const QString &state)
 {
     bool reconnect=!greeted;
+    const bool sameForeign=!reconnect && stage==Stage::Foreign && remote==boardRun;
+    monitorHelloAge.start();
+    if (reconnect && monitorWindow && monitorWindow->isVisible()) {
+        monitorPlot->clear();
+        monitorLastMs.reset();
+        saveObservation->setEnabled(false);
+        monitorWindow->setWindowTitle(tr("实时观察"));
+    }
     greeted=true; boardRun=remote; boardState=state;
     if (remote==run && (state=="ABORT" || state=="DONE")) awaitingStop=false;
-    connection->setText(tr("已连接 · 硬截止 %1 MPa").arg(pressure(hardLimit)));
+    connection->setText(tr("已连接 · 硬截止 %1 MPa / %2 ℃").arg(pressure(hardLimit),temperature(hardTemperature)));
     const QString range=tr("0.001–%1").arg(pressure(hardLimit-1));
+    fields[Protocol::MaxTemperatureField]->setToolTip(
+        tr("自动循环接近设定温度时暂停加热，回落后补热；手动加热达到设定值时结束。可设 0.1–%1 ℃").arg(temperature(hardTemperature)));
     fields[0]->setPlaceholderText(range); fields[0]->setToolTip(range+" MPa");
-    fields[1]->setToolTip(tr("留空取实测值，手动范围 0.000–%1 MPa").arg(pressure(hardLimit-1)));
-    if (!reconnect && run==remote && stage!=Stage::Interrupted) return;
+    fields[1]->setToolTip(tr("仅用于泄压后回压。留空取首个压力采样，可设 0.000–%1 MPa").arg(pressure(hardLimit-1)));
+    if (sameForeign || (!reconnect && run==remote && stage!=Stage::Interrupted)) return;
     if (archive.active() && remote!=run && stage!=Stage::Finished && stage!=Stage::Configure) {
         fault(tr("设备已复位或试验编号改变，旧记录已标为中断。"));
     }
@@ -496,9 +611,16 @@ void MainWindow::acceptSample(const Protocol::Point &p)
     if (stage!=Stage::Finished || outcome.isEmpty()) stateLabel->setText(status);
     values->setText(tr("压力 %1 MPa     NTC0 %2 ℃     NTC1 %3 ℃     加热%4")
         .arg(p.valid & 4 ? pressure(p.p) : QStringLiteral("—"))
-        .arg(p.valid & 1 ? temperature(p.t0) : QStringLiteral("—"))
+        .arg(p.valid & 1 ? Protocol::outletTemperature(p.t0) : QStringLiteral("—"))
         .arg(p.valid & 2 ? temperature(p.t1) : QStringLiteral("—"))
         .arg(p.heat ? tr("开") : tr("关")));
+    if (monitorWindow && monitorWindow->isVisible()) {
+        // Sample frames arrive in wire order. A backwards board clock here means a new timeline.
+        if (monitorLastMs && qint32(p.ms-*monitorLastMs)<0) monitorPlot->clear();
+        monitorLastMs=p.ms;
+        monitorPlot->addSample(p.number,p.ms,p.p,p.t0,p.t1,p.valid);
+        saveObservation->setEnabled(monitorPlot->canExportSelection());
+    }
     const bool preview=stage==Stage::Idle;
     if (!preview && (p.run!=run || !archive.active() || diskFailed ||
         stage==Stage::Finished || stage==Stage::Foreign || stage==Stage::Configure)) return;
@@ -521,7 +643,7 @@ void MainWindow::acceptEvent(const Protocol::Point &p)
         if (prefs.value("pendingRun").toUInt()==run) prefs.remove("pendingRun");
         stage=Stage::Finished; outcome=Protocol::eventName(p.code); stateLabel->setText(outcome);
         QString m=outcome+tr("。记录目录 ")+archive.directory;
-        if (lastSequence && !plot->savePng(QDir(archive.directory).filePath("curve.png")))
+        if (lastSequence && !plot->savePng(QDir(archive.directory).filePath("curve.png"),true))
             m+=tr("；曲线 PNG 保存失败，请重新导出。");
         showMessage(m); updateControls();
     }
@@ -533,7 +655,7 @@ void MainWindow::appendEvent(const Protocol::Point &p)
     plot->addEvent(p.ms,name);
     QStringList row{QString::number(p.round),QString::number(p.ms/1000.,'f',3),name,
                     p.valid & 4 ? pressure(p.p) : QStringLiteral("—"),
-                    p.valid & 1 ? temperature(p.t0) : QStringLiteral("—"),
+                    p.valid & 1 ? Protocol::outletTemperature(p.t0) : QStringLiteral("—"),
                     p.peak || (p.valid & 4) ? pressure(p.peak) : QStringLiteral("—"),
                     p.valid & 2 ? temperature(p.t1) : QStringLiteral("—"),
                     p.stage.isEmpty() ? QStringLiteral("—") : Protocol::stateName(p.stage)};

@@ -61,7 +61,7 @@ int main(int argc, char **argv)
     try {
         SerialReplay link;
         MainWindow station(&link);
-        link.receive("@R,H,1,1400,0,IDLE");
+        link.receive("@R,H,2,1400,700,0,IDLE");
         const QStringList values={"1","","0.01","0.5","1","0.3","0.5","0.2","1","10","60","2"};
         for (int i=0;i<values.size();++i)
             station.findChild<QLineEdit *>("cfg"+QString::number(i))->setText(values[i]);
@@ -81,7 +81,7 @@ int main(int argc, char **argv)
 
         button(station,"断开")->click();
         button(station,"连接")->click();
-        link.receive("@R,H,1,1400,"+run+",IDLE");
+        link.receive("@R,H,2,1400,700,"+run+",IDLE");
         require(link.commands.endsWith("rc stop "+run+"\r"), "orphan configuration not cancelled");
         link.receive("@R,A,"+run+",STOP");
         require(!start->isEnabled(), "STOP acknowledgement prematurely released next start");
@@ -91,7 +91,7 @@ int main(int argc, char **argv)
 
         button(station,"断开")->click();
         button(station,"连接")->click();
-        link.receive("@R,H,1,1400,777,ABORT");
+        link.receive("@R,H,2,1400,700,777,ABORT");
         require(!start->isEnabled(), "unknown retained run ignored");
         button(station,"接收遗留记录")->click();
         require(link.commands.contains("rc sync 777"), "recovery never queried committed event cursor");
@@ -108,7 +108,7 @@ int main(int argc, char **argv)
         {
             SerialReplay reconnect;
             MainWindow restored(&reconnect);
-            reconnect.receive("@R,H,1,1400,777,ABORT");
+            reconnect.receive("@R,H,2,1400,700,777,ABORT");
             auto *table=restored.findChild<QTableWidget *>("eventTable");
             require(table && table->rowCount()==2 && table->item(1,3)->text()=="—" &&
                     table->item(1,4)->text()=="—", "invalid fault channels restored as measured values");
@@ -125,7 +125,7 @@ int main(int argc, char **argv)
         link.receive(repeated);
         QElapsedTimer wait; wait.start();
         while (wait.elapsed()<2400 && !link.commands.contains("rc stop "+run)) {
-            link.receive("@R,H,1,1400,"+run+",HEAT");
+            link.receive("@R,H,2,1400,700,"+run+",HEAT");
             link.receive(repeated);
             QCoreApplication::processEvents();
             QThread::msleep(20);

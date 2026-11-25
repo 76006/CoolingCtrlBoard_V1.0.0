@@ -34,7 +34,9 @@ static void tank_monitor_entry(void *parameter)
 {
     rt_uint8_t candidate_level = 0U;
     rt_uint8_t candidate_count = 0U;
+#if !COOLING_TEST_MODE
     rt_bool_t previous_present = RT_FALSE;
+#endif
 
 #ifdef RT_USING_FINSH
     rt_tick_t last_print_tick = rt_tick_get();
@@ -95,6 +97,7 @@ static void tank_monitor_entry(void *parameter)
             /* 先向安全模块发布罐体状态；此处不持有 tank_lock。 */
             cooling_safety_set_tank(present);
 
+#if !COOLING_TEST_MODE
             /*
              * 存在 -> 不存在：更新安全状态后立即关闭加热输出，
              * 同样不持有 tank_lock，避免锁序反转。
@@ -104,6 +107,7 @@ static void tank_monitor_entry(void *parameter)
                 (void)cooling_heater_set(RT_FALSE);
             }
             previous_present = present;
+#endif
         }
 
 #ifdef RT_USING_FINSH

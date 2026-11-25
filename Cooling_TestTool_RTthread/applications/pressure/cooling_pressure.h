@@ -37,8 +37,10 @@ typedef enum
 typedef struct
 {
     rt_uint16_t pressure_mpa1000;       /* 0.001 MPa */
-    rt_int16_t temperature_deg10;       /* 0.1 摄氏度；测试模式仅显示 */
+    rt_int16_t temperature_deg10;       /* 0.1 摄氏度；正常模式预热目标，工装模式最高温度 */
     rt_uint32_t sequence;
+    rt_bool_t full_power;               /* 工装模式允许加热时连续输出 */
+    rt_bool_t thermal_taper;            /* 自动 PWM 接近控温停热点，限制占空比 */
 } cooling_pressure_targets_t;
 
 /* 供 CAN 等上层任务读取的压力控制快照。 */
@@ -52,7 +54,7 @@ typedef struct
     rt_bool_t adc_valid;                /* 有效位 + 新鲜度；正常模式再查范围 */
     rt_int16_t temperature_deg10;       /* NTC1 当前温度，0.1 摄氏度 */
     rt_uint16_t target_pressure_mpa1000;/* 本周期目标压力，0.001 MPa */
-    rt_int16_t target_temperature_deg10;/* 正常模式预热目标，0.1 摄氏度 */
+    rt_int16_t target_temperature_deg10;/* 正常模式预热目标或工装最高温度，0.1 摄氏度 */
     rt_bool_t temperature_valid;        /* NTC1 有效位 + 新鲜度 + 温阻表 */
     rt_bool_t warmup_complete;          /* 本轮已经到达过升温目标 */
     rt_bool_t tank_present;             /* 统一安全快照中的罐体存在状态 */

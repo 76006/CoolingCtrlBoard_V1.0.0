@@ -54,7 +54,7 @@ void cooling_safety_set_test_heat(rt_bool_t enable, rt_uint32_t trip_sequence);
 
 /*
  * 统一加热允许判定：authorized && calibrated && power_on &&
- * auto_control_enabled && tank_present && !ota_busy 时返回真；
+ * auto_control_enabled && !ota_busy；正常模式另要求插罐，工装模式要求本次授权；
  * 该快照由各状态生产者实时更新。
  */
 rt_bool_t cooling_safety_heater_allowed(void);

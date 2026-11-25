@@ -51,8 +51,7 @@ int main(void)
     adc_result = cooling_adc_start();
 
     /*
-     * 4. 压力任务始终启动；ADC/罐体任务失败时对应快照保持无效，
-     *    控制核心会保持加热关闭。
+     * 4. 压力任务始终启动；ADC 无效时停热。正常模式另要求罐体在位。
      */
     pressure_result = cooling_pressure_start();
 #if COOLING_TEST_MODE

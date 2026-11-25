@@ -66,7 +66,15 @@ void cooling_safety_set_auto_control(rt_bool_t enabled)
 
 void cooling_safety_set_tank(rt_bool_t tank_present)
 {
+#if COOLING_TEST_MODE
+    /* LS is telemetry on the fixture. A transition must not revoke its heat permit. */
+    rt_mutex_take(&safety_lock, RT_WAITING_FOREVER);
+    safety_snapshot.tank_present = tank_present;
+    ++safety_snapshot.sequence;
+    rt_mutex_release(&safety_lock);
+#else
     safety_set(&safety_snapshot.tank_present, tank_present, RT_FALSE);
+#endif
 }
 
 void cooling_safety_set_ota(rt_bool_t busy)
@@ -93,11 +101,12 @@ rt_bool_t cooling_safety_heater_allowed(void)
               safety_snapshot.calibrated &&
               safety_snapshot.power_on &&
               safety_snapshot.auto_control_enabled &&
-              safety_snapshot.tank_present &&
               !safety_snapshot.ota_busy;
 #if COOLING_TEST_MODE
     allowed = allowed && test_heat_enabled &&
               test_heat_trip == safety_snapshot.trip_sequence;
+#else
+    allowed = allowed && safety_snapshot.tank_present;
 #endif
     rt_mutex_release(&safety_lock);
 

@@ -3,13 +3,14 @@
 #include <QList>
 
 namespace Protocol {
-const std::array<Setting, 12> settings {{
-    {"最高压力","MPa",1000,1,1599,""}, {"初始压力","MPa",1000,0,1599,""},
+const std::array<Setting, SettingCount> settings {{
+    {"最高压力","MPa",1000,1,1599,""}, {"回压目标","MPa",1000,0,1599,""},
     {"回压容差","MPa",1000,1,999,""}, {"温降观察窗口","s",10,1,100,""},
     {"触发降幅","℃",10,1,1000,""}, {"开始确认时长","s",10,1,600,""},
     {"停止回升幅度","℃",10,1,1000,""}, {"停止确认时长","s",10,1,600,""},
-    {"压力稳定时长","s",10,1,600,""}, {"达上限观察时长","s",10,1,6000,""},
-    {"单轮最长时长","s",10,1,864000,""}, {"试验轮数","轮",1,1,999,"1"}
+    {"回压稳定时长","s",10,1,600,""}, {"达上限观察时长","s",10,1,6000,""},
+    {"单轮最长时长","s",10,1,864000,""}, {"试验轮数","轮",1,1,999,"1"},
+    {"最高温度（NTC1）","℃",10,1,700,"70.0"}
 }};
 
 bool unsignedField(const QByteArray &s, quint32 &value)
@@ -30,15 +31,16 @@ bool signedField(const QByteArray &s, int &value)
     return true;
 }
 static const QHash<QString, QString> states {
-    {"IDLE","空闲"},{"BASE","采集初始压力"},{"HEAT","加热升压"},{"LIMIT","达上限观察"},
-    {"CHECK","确认温降"},{"VENT","等待回温"},{"RETURN","自然回压"},{"DONE","完成"},{"ABORT","中止"}
+    {"IDLE","空闲"},{"BASE","采集初始压力"},{"HEAT","加热升压"},{"TEMP_HOLD","控温停热，等待降温"},{"LIMIT","达上限观察"},
+    {"CHECK","确认温降"},{"VENT","等待回温"},{"RETURN","自然回压"},{"MANUAL","手动加热"},{"DONE","完成"},{"ABORT","中止"}
 };
 static const QHash<QString, QString> events {
-    {"BASE","初始压力就绪"},{"HEAT","开始加压"},{"LIMIT","达到最高压力"},{"TRIGGER","首次温降触发"},
+    {"BASE","回压参考值"},{"HEAT","开始加压"},{"LIMIT","达到最高压力"},{"TRIGGER","首次温降触发"},
     {"OPEN","泄压开始（NTC0 判定）"},{"CLOSE","泄压停止（NTC0 判定）"},{"ROUND","回压完成"},
     {"DONE","试验完成"},{"FALSE_DROP","温降未确认"},{"NO_RELIEF","达上限未检出泄压"},
     {"TIMEOUT","试验超时"},{"BAD_BASE","初始压力不合格"},{"STOP","人工停止"},
     {"LINK","通信中断"},{"SENSOR","传感器异常"},{"INTERLOCK","联锁停机"},
+    {"MAX_TEMP","达到设定最高温度，已停热"},{"MAX_PRESSURE","达到设定最高压力，已停热"},
     {"OVERPRESS","超压停机"},{"OVERTEMP","超温停机"},{"OVERFLOW","事件缓存已满"}
 };
 QString stateName(const QString &s) { return states.value(s); }
@@ -69,4 +71,8 @@ std::optional<Point> point(const QList<QByteArray> &f, bool event)
 }
 QString pressure(int p) { return QString::number(p / 1000., 'f', 3); }
 QString temperature(int t) { return QString::number(t / 10., 'f', 1); }
+QString outletTemperature(int t)
+{
+    return t < OutletCalibratedMinDeg10 ? temperature(t) + QStringLiteral("（估算）") : temperature(t);
+}
 }

@@ -104,13 +104,19 @@ static const char *const adc_input_name[COOLING_ADC_CHANNEL_COUNT] =
 };
 
 /*
- * TDK NTCG163JX103DT1S RT table, -40 to 150 degrees C in 5 degree steps.
- * Values are resistance in ohms.  Temperature is interpolated between the
- * two nearest entries; no floating-point library is needed on the MCU.
+ * NTC0: TDK NTCG163JX103DT1S. The manufacturer table starts at -40 C.
+ * Below it, estimate the trend from the two coldest nominal points:
+ * B = ln(188500/144300)/(1/233.15 - 1/238.15) = 2967.28 K.
+ * R(T) = 188500 * exp(B * (1/(T+273.15) - 1/233.15)).
+ * The prefix is in 5 C steps; these are extrapolations, not calibration data.
  */
+#define NTC0_OHM_AT_MINUS_40C 188500U
 static const rt_uint32_t ntc0_resistance_ohm[] =
 {
-    188500U, 144300U, 111300U,  86600U,  67800U,
+    9587903U, 6084784U, 3956056U, 2630029U, 1784869U,
+    1234637U, 869286U, 622206U, 452234U, 333428U,
+    249140U,
+    NTC0_OHM_AT_MINUS_40C, 144300U, 111300U,  86600U,  67800U,
      53460U,  42450U,  33930U,  27280U,  22070U,
      17960U,  14700U,  12090U,  10000U,   8310U,
       6940U,   5826U,   4911U,   4158U,   3536U,
@@ -152,44 +158,15 @@ static const rt_uint32_t ntc1_resistance_ohm[] =
        204U,    199U,    195U,    190U,    186U,    181U,    177U
 };
 
-#define NTC_TABLE_FIRST_TEMP_DEG10        (-400)
+#define NTC0_TABLE_FIRST_TEMP_DEG10       (-950)
+#define NTC1_TABLE_FIRST_TEMP_DEG10       (-400)
+#define NTC0_CAL_MIN_DEG10                (-400)
 #define NTC0_TABLE_STEP_DEG10               50
 #define NTC1_TABLE_STEP_DEG10               10
 #define NTC0_TABLE_COUNT                   \
     (sizeof(ntc0_resistance_ohm) / sizeof(ntc0_resistance_ohm[0]))
 #define NTC1_TABLE_COUNT                   \
     (sizeof(ntc1_resistance_ohm) / sizeof(ntc1_resistance_ohm[0]))
-
-static int ntc_temperature_from_adc(rt_uint16_t filtered_adc,
-                                    const rt_uint32_t *resistance_table,
-                                    rt_size_t table_count,
-                                    rt_uint16_t table_step_deg10,
-                                    rt_int16_t *temperature_deg10);
-
-int cooling_ntc_from_adc(cooling_adc_input_t input,
-                                          rt_uint16_t filtered_adc,
-                                          rt_int16_t *temperature_deg10)
-{
-    if (input == COOLING_ADC_NTC0)
-    {
-        return ntc_temperature_from_adc(filtered_adc,
-                                        ntc0_resistance_ohm,
-                                        NTC0_TABLE_COUNT,
-                                        NTC0_TABLE_STEP_DEG10,
-                                        temperature_deg10);
-    }
-
-    if (input == COOLING_ADC_NTC1)
-    {
-        return ntc_temperature_from_adc(filtered_adc,
-                                        ntc1_resistance_ohm,
-                                        NTC1_TABLE_COUNT,
-                                        NTC1_TABLE_STEP_DEG10,
-                                        temperature_deg10);
-    }
-
-    return -1;
-}
 
 static struct rt_mutex adc_snapshot_lock;
 static cooling_adc_snapshot_t adc_snapshot;
@@ -238,10 +215,12 @@ static void adc_print_snapshot(const cooling_adc_snapshot_t *snapshot)
                 {
                     absolute_temperature = -absolute_temperature;
                 }
-                rt_kprintf(" temp=%s%d.%dC",
+                rt_kprintf(" temp=%s%d.%dC%s",
                            (temperature_deg10 < 0) ? "-" : "",
                            (int)(absolute_temperature / 10),
-                           (int)(absolute_temperature % 10));
+                           (int)(absolute_temperature % 10),
+                           (input == COOLING_ADC_NTC0 && temperature_deg10 < NTC0_CAL_MIN_DEG10) ?
+                           " (estimated)" : "");
             }
             else
             {
@@ -252,6 +231,8 @@ static void adc_print_snapshot(const cooling_adc_snapshot_t *snapshot)
         {
             rt_uint16_t pressure_mpa1000;
 
+            rt_kprintf(" sensor_mv=%u", (unsigned int)cooling_pressure_sensor_mv(
+                snapshot->value[input].filtered));
             if (cooling_sensor_pressure_mpa1000(
                     snapshot->value[input].filtered,
                     &pressure_mpa1000) == 0)
@@ -389,29 +370,15 @@ void cooling_adc_get_snapshot(cooling_adc_snapshot_t *snapshot)
     rt_mutex_release(&adc_snapshot_lock);
 }
 
-static int ntc_temperature_from_adc(rt_uint16_t filtered_adc,
-                                    const rt_uint32_t *resistance_table,
-                                    rt_size_t table_count,
-                                    rt_uint16_t table_step_deg10,
-                                    rt_int16_t *temperature_deg10)
+static int ntc_temperature_from_ohms(rt_uint32_t resistance,
+                                     const rt_uint32_t *resistance_table,
+                                     rt_size_t table_count,
+                                     rt_int16_t first_temp_deg10,
+                                     rt_uint16_t table_step_deg10,
+                                     rt_int16_t *temperature_deg10)
 {
-    rt_uint32_t voltage_mv;
-    rt_uint32_t denominator;
-    rt_uint32_t resistance;
     rt_uint32_t index;
     rt_int32_t temperature;
-
-    voltage_mv = ((rt_uint32_t)filtered_adc * COOLING_ADC_REFERENCE_MV +
-                  (COOLING_ADC_FULL_SCALE / 2U)) /
-                 COOLING_ADC_FULL_SCALE;
-    if (voltage_mv >= COOLING_NTC_SUPPLY_MV)
-    {
-        return -1;
-    }
-
-    denominator = COOLING_NTC_SUPPLY_MV - voltage_mv;
-    resistance = (COOLING_NTC_PULLUP_OHM * voltage_mv +
-                  (denominator / 2U)) / denominator;
 
     if ((resistance > resistance_table[0]) ||
         (resistance < resistance_table[table_count - 1U]))
@@ -422,7 +389,7 @@ static int ntc_temperature_from_adc(rt_uint16_t filtered_adc,
     if (resistance == resistance_table[table_count - 1U])
     {
         *temperature_deg10 =
-            (rt_int16_t)(NTC_TABLE_FIRST_TEMP_DEG10 +
+            (rt_int16_t)(first_temp_deg10 +
                          (rt_int32_t)((table_count - 1U) *
                                       table_step_deg10));
         return 0;
@@ -443,7 +410,7 @@ static int ntc_temperature_from_adc(rt_uint16_t filtered_adc,
                  table_step_deg10 +
                  (resistance_span / 2U)) / resistance_span;
 
-            temperature = NTC_TABLE_FIRST_TEMP_DEG10 +
+            temperature = first_temp_deg10 +
                           (rt_int32_t)(index *
                                        table_step_deg10) +
                           (rt_int32_t)temperature_offset;
@@ -455,31 +422,110 @@ static int ntc_temperature_from_adc(rt_uint16_t filtered_adc,
     return -1;
 }
 
+int cooling_ntc_from_adc(cooling_adc_input_t input, rt_uint16_t adc,
+                         rt_int16_t *temperature_deg10)
+{
+    rt_uint32_t adc_mv_scaled = (rt_uint32_t)adc * COOLING_ADC_REFERENCE_MV;
+    rt_uint32_t voltage_mv = (adc_mv_scaled + COOLING_ADC_FULL_SCALE / 2U) / COOLING_ADC_FULL_SCALE;
+    rt_uint32_t denominator;
+    rt_uint32_t resistance;
+
+    if (voltage_mv >= COOLING_NTC_SUPPLY_MV)
+        return -1;
+    denominator = COOLING_NTC_SUPPLY_MV - voltage_mv;
+    resistance = (COOLING_NTC_PULLUP_OHM * voltage_mv + denominator / 2U) / denominator;
+    if (input == COOLING_ADC_NTC0)
+    {
+        if (adc >= COOLING_NTC0_OPEN_ADC)
+            return -1;
+        if (resistance > NTC0_OHM_AT_MINUS_40C)
+        {
+            /* Near the supply rail, rounding to whole millivolts loses ADC codes. */
+            denominator = COOLING_NTC_SUPPLY_MV * COOLING_ADC_FULL_SCALE - adc_mv_scaled;
+            resistance = (rt_uint32_t)(((uint64_t)COOLING_NTC_PULLUP_OHM * adc_mv_scaled +
+                                        denominator / 2U) / denominator);
+            if (resistance < NTC0_OHM_AT_MINUS_40C)
+                resistance = NTC0_OHM_AT_MINUS_40C;
+        }
+        return ntc_temperature_from_ohms(resistance, ntc0_resistance_ohm, NTC0_TABLE_COUNT,
+                                         NTC0_TABLE_FIRST_TEMP_DEG10, NTC0_TABLE_STEP_DEG10,
+                                         temperature_deg10);
+    }
+    if (input == COOLING_ADC_NTC1)
+        return ntc_temperature_from_ohms(resistance, ntc1_resistance_ohm, NTC1_TABLE_COUNT,
+                                         NTC1_TABLE_FIRST_TEMP_DEG10, NTC1_TABLE_STEP_DEG10,
+                                         temperature_deg10);
+    return -1;
+}
+
+uint16_t cooling_pressure_sensor_mv(uint16_t adc)
+{
+    /* Vadc / 0.4586，保留 ADC 换算精度直到传感器毫伏值取整。 */
+    uint64_t numerator = (uint64_t)adc * COOLING_ADC_REFERENCE_MV *
+                         COOLING_PRESSURE_GAIN_DEN;
+    uint32_t denominator = COOLING_ADC_FULL_SCALE * COOLING_PRESSURE_GAIN_NUM;
+
+    return (uint16_t)((numerator + denominator / 2U) / denominator);
+}
+
+typedef struct
+{
+    uint16_t sensor_mv;
+    uint16_t mpa1000;
+} pressure_cal_point_t;
+
+static const pressure_cal_point_t pressure_cal[] = { COOLING_PRESSURE_CAL_POINTS };
+#define PRESSURE_CAL_COUNT (sizeof(pressure_cal) / sizeof(pressure_cal[0]))
+
+uint16_t cooling_pressure_adc_from_mpa1000(uint16_t pressure_mpa1000)
+{
+    size_t hi = 1;
+    while (hi + 1 < PRESSURE_CAL_COUNT && pressure_mpa1000 > pressure_cal[hi].mpa1000)
+    {
+        ++hi;
+    }
+    const pressure_cal_point_t *low = &pressure_cal[hi - 1];
+    const pressure_cal_point_t *high = &pressure_cal[hi];
+    uint32_t span_pressure = high->mpa1000 - low->mpa1000;
+    uint32_t span_mv = high->sensor_mv - low->sensor_mv;
+    /* 保留插值的小数，仅在得到最终 ADC 码值时取整。 */
+    uint32_t scaled_mv = low->sensor_mv * span_pressure +
+                         (pressure_mpa1000 - low->mpa1000) * span_mv;
+    uint64_t numerator = (uint64_t)scaled_mv * COOLING_PRESSURE_GAIN_NUM * COOLING_ADC_FULL_SCALE;
+    uint64_t denominator = (uint64_t)span_pressure * COOLING_PRESSURE_GAIN_DEN * COOLING_ADC_REFERENCE_MV;
+    return (uint16_t)((numerator + denominator / 2U) / denominator);
+}
+
 int cooling_sensor_pressure_mpa1000(uint16_t filtered_adc,
                                     uint16_t *pressure_mpa1000)
 {
-    *pressure_mpa1000 = 0U;
 #if COOLING_PRESSURE_CALIBRATED != 0
-    if (filtered_adc <= COOLING_PRESSURE_ADC_ZERO)
+    uint16_t sensor_mv = cooling_pressure_sensor_mv(filtered_adc);
+    size_t hi = 1;
+    if (sensor_mv <= pressure_cal[0].sensor_mv)
     {
         *pressure_mpa1000 = 0U;
+        return 0;
     }
-    else if (filtered_adc >= COOLING_PRESSURE_ADC_FULL)
+    while (hi + 1 < PRESSURE_CAL_COUNT && sensor_mv > pressure_cal[hi].sensor_mv)
     {
-        *pressure_mpa1000 = COOLING_PRESSURE_FULL_MPA1000;
+        ++hi;
     }
-    else
+    const pressure_cal_point_t *low = &pressure_cal[hi - 1];
+    const pressure_cal_point_t *high = &pressure_cal[hi];
+    uint32_t span_mv = high->sensor_mv - low->sensor_mv;
+    uint32_t span_pressure = high->mpa1000 - low->mpa1000;
+    uint32_t pressure = low->mpa1000 +
+        ((sensor_mv - low->sensor_mv) * span_pressure + span_mv / 2U) / span_mv;
+    if (pressure > COOLING_PRESSURE_FULL_MPA1000)
     {
-        *pressure_mpa1000 = (uint16_t)(
-            ((uint32_t)(filtered_adc - COOLING_PRESSURE_ADC_ZERO) *
-             COOLING_PRESSURE_FULL_MPA1000 +
-             ((COOLING_PRESSURE_ADC_FULL -
-               COOLING_PRESSURE_ADC_ZERO) / 2U)) /
-            (COOLING_PRESSURE_ADC_FULL - COOLING_PRESSURE_ADC_ZERO));
+        pressure = COOLING_PRESSURE_FULL_MPA1000;
     }
+    *pressure_mpa1000 = (uint16_t)pressure;
     return 0;
 #else
     (void)filtered_adc;
+    *pressure_mpa1000 = 0U;
     return -1;
 #endif
 }

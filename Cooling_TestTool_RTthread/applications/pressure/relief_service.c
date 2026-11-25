@@ -18,6 +18,7 @@ typedef struct
     relief_state_t state;
     uint16_t round;
     uint8_t heater;
+    uint8_t temperature_hold;
 } wire_sample_t;
 
 static struct rt_mutex session_lock;
@@ -28,6 +29,7 @@ static relief_config_t config;
 static uint32_t run_id, next_event, acknowledged, start_ms;
 static uint32_t run_trip, last_contact, heartbeat;
 static rt_bool_t started, streaming, overflow;
+static rt_bool_t temperature_hold;  /* Owned by session_lock; scoped to one run. */
 static wire_sample_t latest;
 static relief_event_t events[EVENT_CAPACITY];
 static rt_uint32_t saved_echo, saved_prompt;
@@ -100,12 +102,13 @@ static void abort_test(const char *why, uint32_t now, const relief_sample_t *sam
 
 rt_bool_t relief_service_control(const cooling_adc_snapshot_t *adc,
                                  rt_uint32_t blocks, rt_int16_t ntc1,
-                                 rt_uint16_t *target)
+                                 rt_int16_t raw_ntc1, cooling_pressure_targets_t *targets)
 {
     relief_sample_t s = {0};
     const char *fault = RT_NULL;
     rt_bool_t allow;
     int16_t raw_temp;
+    const int16_t hottest = raw_ntc1 > ntc1 ? raw_ntc1 : ntc1;
     uint32_t now = now_ms();
     if (!ready) return RT_FALSE;
     s.seq = adc->sequence;
@@ -133,6 +136,7 @@ rt_bool_t relief_service_control(const cooling_adc_snapshot_t *adc,
         if (blocks & COOLING_PRESSURE_BLOCK_OVERPRESSURE) fault = "OVERPRESS";
         else if (blocks & COOLING_PRESSURE_BLOCK_OVERTEMPERATURE) fault = "OVERTEMP";
         else if (s.valid != 7U) fault = "SENSOR";
+        else if (config.manual && hottest >= config.max_t) fault = "MAX_TEMP";
         else if (blocks || safety.trip_sequence != run_trip) fault = "INTERLOCK";
         else if (now - heartbeat >= LINK_TIMEOUT_MS) fault = "LINK";
 
@@ -155,9 +159,30 @@ rt_bool_t relief_service_control(const cooling_adc_snapshot_t *adc,
     latest.state = cycle.state;
     latest.round = cycle.round;
     latest.heater = adc->heater_on;
-    allow = cycle.state == RELIEF_HEAT;
+    targets->thermal_taper = RT_FALSE;
+    if (relief_active(&cycle) && !config.manual && (s.valid & 2U))
+    {
+        /* Monitor NTC1 throughout the run. Pressure limits and the NTC0 detector
+         * continue to run in relief_step even while heat permission is withdrawn. */
+        int32_t stop_at = config.max_t - COOLING_AUTO_TEMP_STOP_MARGIN_DEG10;
+        if (hottest >= stop_at)
+            temperature_hold = RT_TRUE;
+        else if (hottest <= stop_at - COOLING_AUTO_TEMP_RESTART_DROP_DEG10)
+            temperature_hold = RT_FALSE;
+        targets->thermal_taper = !config.full_power &&
+            hottest >= stop_at - COOLING_AUTO_TEMP_PWM_TAPER_BAND_DEG10;
+    }
+    latest.temperature_hold = cycle.state == RELIEF_HEAT && temperature_hold;
+    allow = cycle.seen_sample && ((cycle.state == RELIEF_HEAT && !temperature_hold) ||
+                                  cycle.state == RELIEF_MANUAL);
     cooling_safety_set_test_heat(allow, run_trip);
-    if (run_id) *target = (rt_uint16_t)config.max_p;
+    if (run_id)
+    {
+        targets->pressure_mpa1000 = (rt_uint16_t)config.max_p;
+        targets->temperature_deg10 = (rt_int16_t)config.max_t;
+        targets->sequence = run_id;
+        targets->full_power = config.full_power != 0;
+    }
     rt_mutex_release(&session_lock);
     return allow;
 }
@@ -210,6 +235,9 @@ static void stream_entry(void *parameter)
         if (sample_due)
         {
             const relief_sample_t *s = &report.sample;
+            /* Optional annotation. Keep the sample and event frames readable by v2 clients. */
+            if (report.temperature_hold)
+                send_line("\n@R,T,%u,%u,HOLD\n", (unsigned)report.run, (unsigned)s->seq);
             send_line("\n@R,S,%u,%u,%u,%u,%s,%u,%d,%d,%u,%u\n",
                 (unsigned)report.run, (unsigned)s->seq, (unsigned)s->ms, report.round,
                 relief_state_name(report.state), s->p, s->t0, s->t1, s->valid, report.heater);
@@ -264,15 +292,29 @@ static int decimal(const char **cursor, char delimiter, int32_t *value)
     return 1;
 }
 
-static const char *parse_cfg(const char *p, relief_config_t *cfg)
+static const char *parse_cfg(const char *p, relief_config_t *cfg, int manual)
 {
     int32_t *fields[] = {&cfg->max_p, &cfg->initial_p, &cfg->tolerance,
         &cfg->window, &cfg->drop, &cfg->start_hold, &cfg->rise, &cfg->stop_hold,
-        &cfg->stable, &cfg->observe, &cfg->timeout, &cfg->rounds};
+        &cfg->stable, &cfg->observe, &cfg->timeout, &cfg->rounds, &cfg->max_t};
     unsigned i;
-    for (i = 0; i < sizeof(fields)/sizeof(fields[0]); ++i)
-        if (!decimal(&p, i == 11 ? 0 : ',', fields[i])) return "FORMAT";
-    return relief_validate(cfg, COOLING_PRESSURE_CUTOFF_MPA1000);
+    unsigned count = sizeof(fields)/sizeof(fields[0]);
+    cfg->manual = manual;
+    if (manual)
+    {
+        fields[1] = &cfg->max_t;
+        count = 2;
+    }
+    for (i = 0; i + 1 < count; ++i)
+        if (!decimal(&p, ',', fields[i])) return "FORMAT";
+    /* Classic protocol-2 configurations end at max_t and select staged PWM. */
+    cfg->full_power = 0;
+    if (!decimal(&p, 0, fields[count - 1]))
+    {
+        if (!decimal(&p, ',', fields[count - 1]) || !decimal(&p, 0, &cfg->full_power))
+            return "FORMAT";
+    }
+    return relief_validate(cfg, COOLING_PRESSURE_CUTOFF_MPA1000, COOLING_TEMPERATURE_CUTOFF_DEG10);
 }
 
 static void rc(int argc, char **argv)
@@ -309,8 +351,9 @@ static void rc(int argc, char **argv)
         }
         streaming = RT_TRUE;
         last_contact = now;
-        rt_snprintf(reply, sizeof(reply), "\n@R,H,1,%u,%u,%s\n",
-            COOLING_PRESSURE_CUTOFF_MPA1000, (unsigned)run_id, relief_state_name(cycle.state));
+        rt_snprintf(reply, sizeof(reply), "\n@R,H,2,%u,%d,%u,%s\n",
+            COOLING_PRESSURE_CUTOFF_MPA1000, COOLING_TEMPERATURE_CUTOFF_DEG10,
+            (unsigned)run_id, relief_state_name(cycle.state));
     }
     else if (!rt_strcmp(cmd, "ping") && argc == 4)
     {
@@ -336,10 +379,10 @@ static void rc(int argc, char **argv)
         else rt_snprintf(reply, sizeof(reply), "\n@R,Y,%u,%u,%u\n",
             (unsigned)run, (unsigned)acknowledged, (unsigned)next_event);
     }
-    else if (!rt_strcmp(cmd, "cfg") && argc == 4 && run > 0)
+    else if ((!rt_strcmp(cmd, "cfg") || !rt_strcmp(cmd, "mcfg")) && argc == 4 && run > 0)
     {
-        relief_config_t parsed;
-        error = parse_cfg(argv[3], &parsed);
+        relief_config_t parsed = {0};
+        error = parse_cfg(argv[3], &parsed, !rt_strcmp(cmd, "mcfg"));
         if (!error && (uint32_t)run == run_id)
         {
             if (rt_memcmp(&parsed, &config, sizeof(config))) error = "RUN_USED";
@@ -371,6 +414,7 @@ static void rc(int argc, char **argv)
                 cooling_safety_set_power(RT_TRUE);
                 cooling_safety_get_snapshot(&safety);
                 run_trip = safety.trip_sequence;
+                temperature_hold = RT_FALSE;
                 heartbeat = last_contact = start_ms = now;
                 relief_begin(&cycle, &config, now, on_event, RT_NULL);
                 started = RT_TRUE;

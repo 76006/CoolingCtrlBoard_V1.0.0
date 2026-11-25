@@ -42,15 +42,24 @@
 /* NTC0/NTC1 均为 VREF_3V -- 10k 上拉 -- ADC -- NTC -- GND。 */
 #define COOLING_NTC_SUPPLY_MV                     3000U
 #define COOLING_NTC_PULLUP_OHM                    10000U
+/* NTC0 within four counts of the supply rail cannot be distinguished reliably from an open input. */
+#define COOLING_NTC0_OPEN_ADC                    (COOLING_ADC_FULL_SCALE - 4U)
 
 /*
- * 压力传感器：0.5--4.5 V 对应 0--1.600 MPa。
- * 板上调理电路理论增益为 72/157；ADC 参考电压为 3.0 V，
- * 因而零点约为 ADC 313，满量程约为 ADC 2817。
+ * ADC 引脚电压 = 传感器输出电压 × 0.4586。
+ * 标定表按 sensor_mv（mV）、参考表实测压力（0.001 MPa）递增排列。
+ * 2026-11-25 零点采样：raw=294，filtered=297，ADC 引脚电压 218 mV。
+ * 1.200 MPa 采样：raw=2793，filtered=2799，ADC 引脚电压 2051 mV。
+ * 相邻点间线性插值，高于最高实测点时沿最后一段外推。
  */
 #define COOLING_PRESSURE_CALIBRATED               1U
-#define COOLING_PRESSURE_ADC_ZERO                  313U
-#define COOLING_PRESSURE_ADC_FULL                 2817U
+#define COOLING_PRESSURE_GAIN_NUM                 4586U
+#define COOLING_PRESSURE_GAIN_DEN                10000U
+#define COOLING_PRESSURE_CAL_POINTS \
+    {  474,    0 },                 \
+    { 2860,  700 },                 \
+    { 3038,  790 },                 \
+    { 4471, 1200 }
 #define COOLING_PRESSURE_FULL_MPA1000             1600U
 
 /* ---------------------------------------------------------------------
@@ -60,7 +69,7 @@
 /*
  * 1：Qt 泄压循环试验，上电停热，由串口显式启动，板端执行判定。
  * 0：正常模式，保留温压保护及升压超时。
- * 两种模式均保留 UID、标定、罐体、有效压力采样和 OTA 联锁。
+ * 两种模式均保留 UID、标定、有效压力采样和 OTA 联锁；仅正常模式要求已插罐。
  */
 #ifndef COOLING_TEST_MODE
 #define COOLING_TEST_MODE                       1
@@ -79,8 +88,13 @@
 #define COOLING_WARMUP_DUTY_PERCENT              100U
 #define COOLING_WARMUP_HOLD_DUTY_PERCENT          50U
 
-/* NTC1 达到硬截止温度停热并锁存故障，拔罐后复位。 */
+/* NTC1 达到硬截止温度停热。工装结束当次运行；正常模式锁存到拔罐。 */
 #define COOLING_TEMPERATURE_CUTOFF_DEG10           700
+
+/* 工装自动循环：预留余热升温空间，温度回落后再允许补热（0.1 ℃）。 */
+#define COOLING_AUTO_TEMP_STOP_MARGIN_DEG10         20
+#define COOLING_AUTO_TEMP_RESTART_DROP_DEG10        10
+#define COOLING_AUTO_TEMP_PWM_TAPER_BAND_DEG10      20
 
 /* 目标压力默认值；运行时可用 heater_target 修改，分段阈值同步平移。 */
 #define COOLING_PRESSURE_TARGET_MPA1000           1000U
@@ -101,14 +115,8 @@
 
 /* 压力达到硬截止值锁存故障。 */
 #define COOLING_PRESSURE_CUTOFF_MPA1000           1400U
-#define COOLING_PRESSURE_CUTOFF_ADC                \
-    (COOLING_PRESSURE_ADC_ZERO +                                        \
-     ((COOLING_PRESSURE_CUTOFF_MPA1000 *                                \
-       (COOLING_PRESSURE_ADC_FULL - COOLING_PRESSURE_ADC_ZERO) +         \
-       (COOLING_PRESSURE_FULL_MPA1000 / 2U)) /                             \
-      COOLING_PRESSURE_FULL_MPA1000))
 
-/* 正常模式：实际压力达到 1.100 MPa 才向主控报故障。 */
+/* 正常模式：实际压力达到上报阈值时向主控报故障。 */
 #define COOLING_PRESSURE_ERROR_REPORT_MPA1000     1300U
 
 /* 正常模式：升压总时长超过该值仍未达标，锁存冷媒不足到拔罐。 */
@@ -121,7 +129,7 @@
 #define COOLING_PRESSURE_ADC_MIN_FILTERED       100U
 #define COOLING_PRESSURE_ADC_MAX_FILTERED       4000U
 /* 测试板传感器电气诊断，标定端点外留量程 2% 以容纳零点误差。 */
-#define COOLING_TEST_PRESSURE_ADC_MARGIN        ((COOLING_PRESSURE_ADC_FULL - COOLING_PRESSURE_ADC_ZERO) / 50U)
+#define COOLING_TEST_PRESSURE_ADC_MARGIN_PERCENT  2U
 
 /* 压力控制线程参数。优先级高于罐体监测(14)与 ADC(15)采样任务。 */
 #if COOLING_TEST_MODE

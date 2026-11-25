@@ -185,6 +185,6 @@ CAN OTA: started (0)
 
 默认配置 `COOLING_TEST_MODE=1` 使用 Qt 上位机进行循环试验。新测试模式上电停热，等待串口配置和启动命令。NTC0 监测泄压口，NTC1 监测罐体温度。达到设定压力或触发温降后，本轮持续停热，确认回温并自然回到初始压力后才进入下一轮。运行步骤和记录格式见 [Qt 上位机使用说明](../Cooling_TestTool_Qt/README.md)。
 
-测试固件在 USART1（115200，8-N-1）接受 `rc hello` 握手，返回协议版本、压力硬截止值、试验号和状态。温压阈值由 Qt 整组下发并取得板端回显。现有 `heater_power off` 仍能立即关闭加热。已连接 Qt 时由它独占串口。
+测试固件在 USART1（115200，8-N-1）接受 `rc hello` 握手，协议 2 返回压力及 NTC1 温度硬截止值、试验号和状态。工装模式下 LS 仅上报在位状态，自动循环和手动加热均由 Qt 启动。温压阈值由 Qt 整组下发并取得板端回显。现有 `heater_power off` 仍能立即关闭加热。已连接 Qt 时由它独占串口。
 
 在 Studio 中将 `applications/cooling_config.h` 的 `COOLING_TEST_MODE` 设为 0 再编译即可启用原正常模式。SCons 也支持 `scons cooling_test_mode=0`。正常模式沿用 CAN 指令、预热、分段压力控制及保护，可通过 `heater_target` 查询运行目标。两个模式构建后都导出到同一 `output` 目录。

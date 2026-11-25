@@ -8,13 +8,15 @@
 typedef struct
 {
     int32_t max_p, initial_p, tolerance, window, drop, start_hold;
-    int32_t rise, stop_hold, stable, observe, timeout, rounds;
+    int32_t rise, stop_hold, stable, observe, timeout, rounds, max_t;
+    int32_t manual; /* Set locally by the manual configuration command. */
+    int32_t full_power; /* Optional final wire field: 0 = staged PWM, 1 = continuous on. */
 } relief_config_t;
 
 typedef enum
 {
-    RELIEF_IDLE, RELIEF_BASE, RELIEF_HEAT, RELIEF_LIMIT, RELIEF_CHECK,
-    RELIEF_VENT, RELIEF_RETURN, RELIEF_DONE, RELIEF_ABORT
+    RELIEF_IDLE, RELIEF_HEAT, RELIEF_LIMIT, RELIEF_CHECK,
+    RELIEF_VENT, RELIEF_RETURN, RELIEF_MANUAL, RELIEF_DONE, RELIEF_ABORT
 } relief_state_t;
 
 typedef struct
@@ -46,8 +48,7 @@ typedef struct
     relief_emit_t emit;
     void *context;
     uint32_t round_ms, hold_ms, limit_ms;
-    uint32_t base_sum, base_count;
-    uint16_t base_min, base_max, candidate_peak;
+    uint16_t candidate_peak;
     int16_t reference_t0, minimum_t0;
     uint8_t seen_sample, holding, limit_seen;
     uint8_t head, count;
@@ -56,7 +57,7 @@ typedef struct
 } relief_cycle_t;
 
 /* Returns NULL for a legal configuration, otherwise a wire-safe error. */
-const char *relief_validate(const relief_config_t *cfg, int32_t hard_p);
+const char *relief_validate(const relief_config_t *cfg, int32_t hard_p, int32_t hard_t);
 const char *relief_state_name(relief_state_t state);
 int relief_active(const relief_cycle_t *cycle);
 /* Caller validates cfg, enforces idle/start idempotence and hardware

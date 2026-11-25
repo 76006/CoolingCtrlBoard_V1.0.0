@@ -11,7 +11,9 @@ struct Setting {
     int scale, low, high;
     const char *initial;
 };
-extern const std::array<Setting, 12> settings;
+constexpr int MaxTemperatureField = 12;
+constexpr int SettingCount = MaxTemperatureField + 1;
+extern const std::array<Setting, SettingCount> settings;
 struct Point {
     quint32 run, number, ms;
     int round;
@@ -26,4 +28,7 @@ QString eventName(const QString &code);
 bool terminalEvent(const QString &code);
 QString pressure(int p);
 QString temperature(int t);
+// Below the TDK nominal resistance table, outlet temperatures are extrapolated.
+constexpr int OutletCalibratedMinDeg10 = -400;
+QString outletTemperature(int t);
 }

@@ -61,7 +61,7 @@ static void can_send_handshake(void)
 
 static uint8_t can_refrigerant_level(const cooling_pressure_snapshot_t *p)
 {
-    if (!p->tank_present || p->refrigerant_low)
+    if (p->refrigerant_low || (!COOLING_TEST_MODE && !p->tank_present))
     {
         return COOLING_CAN_REFRIGERANT_NONE;
     }
@@ -162,8 +162,10 @@ static void can_report_errors(void)
     }
 #endif
 
+#if !COOLING_TEST_MODE
     can_report_error(1UL << 0, COOLING_CAN_ERROR_NO_TANK,
                      pressure.tank_present ? RT_FALSE : RT_TRUE);
+#endif
     can_report_error(1UL << 1, COOLING_CAN_ERROR_REFRIGERANT_LOW,
                      pressure.refrigerant_low);
     can_report_error(1UL << 2, COOLING_CAN_ERROR_PRESSURE_SENSOR,

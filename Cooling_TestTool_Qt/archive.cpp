@@ -69,12 +69,20 @@ bool Archive::create(const QString &base, quint32 run, const QByteArray &cfg)
         return false;
     }
     directory = root.absoluteFilePath(name);
-    QJsonObject json{{"run", static_cast<qint64>(run)},{"protocol",1},{"wire_config",QString::fromLatin1(cfg)},
+    QJsonObject json{{"run", static_cast<qint64>(run)},{"protocol",2},{"wire_config",QString::fromLatin1(cfg)},
                      {"recovery",partial},{"created",QDateTime::currentDateTime().toString(Qt::ISODateWithMs)}};
+    json["ntc0_calibrated_min_C"] = Protocol::OutletCalibratedMinDeg10 / 10.0;
+    json["ntc0_below_calibrated_min"] = QStringLiteral("冷端温阻外推估算");
     auto values = cfg.split(',');
-    if (values.size() == 12) {
-        for (int i=0;i<12;++i) {
-            const auto &f = Protocol::settings[i];
+    bool fullPower = false;
+    if (values.size()==3 || values.size()==Protocol::SettingCount+1)
+        fullPower = values.takeLast()=="1";
+    const bool manual = values.size()==2;
+    if (manual || values.size()==Protocol::SettingCount) {
+        json["调温方式"] = fullPower ? QStringLiteral("满功率调温") : QStringLiteral("分段 PWM 调温");
+        json["mode"] = manual ? QStringLiteral("手动加热") : QStringLiteral("循环泄压");
+        for (int i=0;i<values.size();++i) {
+            const auto &f = Protocol::settings[manual && i==1 ? Protocol::MaxTemperatureField : i];
             const QString key = QString::fromUtf8(f.label) + " (" + QString::fromUtf8(f.unit) + ")";
             if (i==1 && values[i]=="-1") json[key] = QStringLiteral("自动实测");
             else json[key] = values[i].toInt()/double(f.scale);

@@ -56,11 +56,7 @@ static rt_uint16_t pressure_threshold_adc(rt_uint16_t target_mpa1000,
     {
         value = COOLING_PRESSURE_FULL_MPA1000;
     }
-    return (rt_uint16_t)(COOLING_PRESSURE_ADC_ZERO +
-        (((rt_uint32_t)value *
-          (COOLING_PRESSURE_ADC_FULL - COOLING_PRESSURE_ADC_ZERO) +
-          COOLING_PRESSURE_FULL_MPA1000 / 2U) /
-         COOLING_PRESSURE_FULL_MPA1000));
+    return cooling_pressure_adc_from_mpa1000((rt_uint16_t)value);
 }
 
 static void pressure_reset(void)
@@ -214,6 +210,12 @@ static rt_uint8_t pressure_update(rt_uint16_t raw_adc,
         }
     }
 
+#if COOLING_TEST_MODE
+    if (targets->full_power)
+        return 100U;
+    if (targets->thermal_taper)
+        return COOLING_PRESSURE_SLOW_DUTY_PERCENT;
+#endif
     if (pressure < fast_end_adc)
     {
         return COOLING_PRESSURE_FAST_DUTY_PERCENT;
@@ -232,6 +234,18 @@ static void pressure_control_entry(void *parameter)
     rt_bool_t last_power_on = RT_FALSE;
     rt_uint32_t window_elapsed_ms = 0U;
     rt_uint32_t last_targets_sequence = 0U;
+    const rt_uint16_t cutoff_adc =
+        cooling_pressure_adc_from_mpa1000(COOLING_PRESSURE_CUTOFF_MPA1000);
+#if COOLING_TEST_MODE
+    const rt_uint16_t zero_adc = cooling_pressure_adc_from_mpa1000(0U);
+    const rt_uint16_t full_adc =
+        cooling_pressure_adc_from_mpa1000(COOLING_PRESSURE_FULL_MPA1000);
+    const rt_uint16_t margin =
+        (full_adc - zero_adc) * COOLING_TEST_PRESSURE_ADC_MARGIN_PERCENT / 100U;
+    const rt_uint16_t min_adc = zero_adc > margin ? zero_adc - margin : 0U;
+    const rt_uint16_t max_adc = full_adc + margin < COOLING_ADC_FULL_SCALE ?
+        full_adc + margin : COOLING_ADC_FULL_SCALE;
+#endif
 
 #ifdef RT_USING_FINSH
     rt_tick_t last_print_tick = last_tick;
@@ -267,18 +281,6 @@ static void pressure_control_entry(void *parameter)
         next.tank_present = safety.tank_present;
         cooling_pressure_get_targets(&targets);
 
-        /* 新一轮开启或目标变化时重启控制阶段，保留故障锁存。 */
-        if ((safety.power_on && !last_power_on) ||
-            (targets.sequence != last_targets_sequence))
-        {
-            pressure_sufficient = RT_FALSE;
-            pressure_maintain_on = RT_FALSE;
-            pressure_warmup_complete = RT_FALSE;
-            pressure_boost_elapsed_ms = 0U;
-        }
-        last_power_on = safety.power_on;
-        last_targets_sequence = targets.sequence;
-
         cooling_heater_get_snapshot(&heater);
         next.heater_on = heater.heater_on;
 
@@ -289,14 +291,10 @@ static void pressure_control_entry(void *parameter)
               COOLING_ADC_VALID_BIT(COOLING_ADC_HYSN2)) != 0U) &&
             (adc_age_ms <= COOLING_PRESSURE_ADC_MAX_AGE_MS)
 #if COOLING_TEST_MODE
-            && (adc.value[COOLING_ADC_HYSN2].raw >=
-                COOLING_PRESSURE_ADC_ZERO - COOLING_TEST_PRESSURE_ADC_MARGIN)
-            && (adc.value[COOLING_ADC_HYSN2].raw <=
-                COOLING_PRESSURE_ADC_FULL + COOLING_TEST_PRESSURE_ADC_MARGIN)
-            && (adc.value[COOLING_ADC_HYSN2].filtered >=
-                COOLING_PRESSURE_ADC_ZERO - COOLING_TEST_PRESSURE_ADC_MARGIN)
-            && (adc.value[COOLING_ADC_HYSN2].filtered <=
-                COOLING_PRESSURE_ADC_FULL + COOLING_TEST_PRESSURE_ADC_MARGIN)
+            && (adc.value[COOLING_ADC_HYSN2].raw >= min_adc)
+            && (adc.value[COOLING_ADC_HYSN2].raw <= max_adc)
+            && (adc.value[COOLING_ADC_HYSN2].filtered >= min_adc)
+            && (adc.value[COOLING_ADC_HYSN2].filtered <= max_adc)
 #else
             &&
             (adc.value[COOLING_ADC_HYSN2].filtered >=
@@ -351,7 +349,7 @@ static void pressure_control_entry(void *parameter)
         {
             block_reason |= COOLING_PRESSURE_BLOCK_AUTO_DISABLED;
         }
-        if (!safety.tank_present)
+        if (!COOLING_TEST_MODE && !safety.tank_present)
         {
             block_reason |= COOLING_PRESSURE_BLOCK_NO_TANK;
         }
@@ -364,10 +362,15 @@ static void pressure_control_entry(void *parameter)
             block_reason |= COOLING_PRESSURE_BLOCK_TEMP_INVALID;
         }
 
+#if COOLING_TEST_MODE
+        /* The run latches a hard trip in ABORT. Starting again requires a new
+         * operator command and fresh readings below both cutoffs. */
+        pressure_over_latched = RT_FALSE;
+        temperature_over_latched = RT_FALSE;
+#endif
         /* 使用未滤波值做硬关断，避免滤波延迟造成超压。 */
         if (adc_valid &&
-            (adc.value[COOLING_ADC_HYSN2].raw >=
-             COOLING_PRESSURE_CUTOFF_ADC))
+            (adc.value[COOLING_ADC_HYSN2].raw >= cutoff_adc))
         {
             pressure_over_latched = RT_TRUE;
         }
@@ -393,9 +396,21 @@ static void pressure_control_entry(void *parameter)
         last_tick = now;
 #if COOLING_TEST_MODE
         if (!relief_service_control(&adc, block_reason, temperature_deg10,
-                                    &targets.pressure_mpa1000))
+                                    raw_temperature_deg10, &targets))
             block_reason |= COOLING_PRESSURE_BLOCK_TEST_WAIT;
 #endif
+        /* 新一轮开启或目标变化时重启控制阶段，保留故障锁存。 */
+        if ((safety.power_on && !last_power_on) ||
+            (targets.sequence != last_targets_sequence))
+        {
+            pressure_sufficient = RT_FALSE;
+            pressure_maintain_on = RT_FALSE;
+            pressure_warmup_complete = RT_FALSE;
+            pressure_boost_elapsed_ms = 0U;
+        }
+        last_power_on = safety.power_on;
+        last_targets_sequence = targets.sequence;
+
         duty_percent = pressure_update(next.raw, next.filtered,
                                        temperature_deg10, block_reason,
                                        dt_ms, &targets);
@@ -602,7 +617,8 @@ static void pressure_print_snapshot(const cooling_pressure_snapshot_t *snapshot)
                (unsigned int)snapshot->millivolts);
     if (pressure_valid)
     {
-        rt_kprintf(" pressure=%u.%03uMPa\n",
+        rt_kprintf(" sensor_mv=%u pressure=%u.%03uMPa\n",
+                   (unsigned int)cooling_pressure_sensor_mv(snapshot->filtered),
                    (unsigned int)(pressure_mpa1000 / 1000U),
                    (unsigned int)(pressure_mpa1000 % 1000U));
     }

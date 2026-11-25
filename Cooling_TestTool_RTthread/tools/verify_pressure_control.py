@@ -6,6 +6,7 @@ Requires the Python unicorn package. No board is accessed.
 
 import argparse
 import struct
+from fractions import Fraction
 from pathlib import Path
 
 from unicorn import Uc, UC_ARCH_ARM, UC_HOOK_CODE, UC_MODE_MCLASS, UC_MODE_THUMB
@@ -84,7 +85,11 @@ class Firmware:
 
     @staticmethod
     def adc(pressure):
-        return 313 + (pressure * 2504 + 800) // 1600
+        points = ((0, 474), (700, 2860), (790, 3038), (1200, 4471))
+        for (p0, mv0), (p1, mv1) in zip(points, points[1:]):
+            if pressure <= p1 or p1 == points[-1][0]:
+                sensor_mv = mv0 + Fraction((pressure - p0) * (mv1 - mv0), p1 - p0)
+                return int(sensor_mv * Fraction(4586 * 4095, 10000 * 3000) + Fraction(1, 2))
 
     def heater_init(self):
         self.output = False
@@ -198,6 +203,32 @@ class Firmware:
         self.call("cooling_safety_set_tank", 1)
 
 
+def verify_calibration(path, test_mode):
+    board = Firmware(path)
+    for adc, expected in ((2799, 1200), (0, 0), (297, 0), (1565, 594),
+                          (1790, 700), (1791, 701), (1846, 745), (1902, 790),
+                          (2162, 909), (2504, 1065), (2867, 1231), (4095, 1600)):
+        assert board.call("cooling_sensor_pressure_mpa1000", adc, board.SCRATCH) == 0
+        actual, = struct.unpack("<H", board.uc.mem_read(board.SCRATCH, 2))
+        assert actual == expected, (adc, actual, expected)
+    for pressure, adc in ((0, 297), (700, 1790), (790, 1902), (1000, 2361),
+                          (1200, 2799), (1400, 3236), (1600, 3674)):
+        assert board.call("cooling_pressure_adc_from_mpa1000", pressure) == adc, pressure
+    board.filtered = 1790
+    board.raw = 3235
+    assert board.cycle()["block"] & (1 << 8) == 0
+    board.raw = 3236
+    assert board.cycle()["block"] & (1 << 8), "hard cutoff uses raw ADC"
+    if test_mode:
+        for field in ("raw", "filtered"):
+            for adc, valid in ((229, False), (230, True), (3741, True), (3742, False)):
+                board.raw = board.filtered = 1790
+                setattr(board, field, adc)
+                invalid = board.cycle()["block"] & (1 << 6)
+                assert bool(invalid) == (not valid), (field, adc)
+    print("PASS: pressure calibration points, interpolation, extrapolation and ADC protection thresholds")
+
+
 def verify_normal(path):
     board = Firmware(path)
     board.call("cooling_safety_set_tank", 1)
@@ -274,7 +305,7 @@ def verify_normal(path):
 
 def verify_relief(path):
     board = Firmware(path)
-    board.call("cooling_safety_set_tank", 1)
+    # The fixture can run with its LS input disconnected.
     assert board.cycle()["duty"] == 0 and not board.output
     # Existing CAN/shell power gates may open, but cannot override test ownership.
     board.command("heater_power", "on")
@@ -286,9 +317,9 @@ def verify_relief(path):
         board.command("rc", *args)
         assert board.wire[before:] == [expect], (args, board.wire[before:])
 
-    command("hello", expect="@R,H,1,1400,0,IDLE")
+    command("hello", expect="@R,H,2,1400,700,0,IDLE")
     run = 42
-    cfg = "900,-1,5,2,10,2,5,2,2,10,100,2"
+    cfg = "900,-1,5,2,10,2,5,2,2,10,100,2,600"
 
     def start():
         run_text = str(run)
@@ -330,13 +361,11 @@ def verify_relief(path):
         assert int(frame[11]) == int(heat_at_sample), "sample and output must share a time base"
         if state:
             assert frame[6] == state, (state, frame)
-        if frame[6] != "HEAT":
+        if frame[6] not in ("HEAT", "MANUAL"):
             assert control["duty"] == 0 and not board.output, (control, frame)
         return control, frame
 
     def baseline():
-        point(300, state="BASE")
-        point(300, state="BASE")
         control, frame = point(300, state="HEAT")
         assert control["target"] == 900 and control["duty"] > 0 and board.output
         assert int(frame[10]) == 7
@@ -345,7 +374,7 @@ def verify_relief(path):
         board.command("rc", "ping", str(run), str(len(events())))
 
     command("start", "41", expect="@R,X,41,RUN")
-    command("cfg", str(run), cfg + ",77", expect=f"@R,X,{run},FORMAT")
+    command("cfg", str(run), cfg + ",77", expect=f"@R,X,{run},HEAT_MODE")
     start()
     baseline()
     for round_number in (1, 2):
@@ -361,7 +390,8 @@ def verify_relief(path):
         assert (int(open_event[4]), int(open_event[5])) == (trigger_tick, round_number)
         assert int(open_event[7]) == 856 and int(open_event[10]) == 900, open_event
         assert open_event[11:] == ["VENT", "7"], open_event
-        point(300, 2300, "VENT")
+        _, cold = point(300, 4030, "VENT")  # outlet near -60 C, electrically valid
+        assert int(cold[8]) < -400 and int(cold[10]) == 7
         point(300, 2048, "VENT")
         point(300, 2048, "VENT")
         point(300, 2048, "RETURN")
@@ -374,7 +404,7 @@ def verify_relief(path):
     command("cfg", cmd_run, cfg, expect=f"@R,X,{cmd_run},PENDING")
     # Simulate a reconnect with a lost final event ACK.
     board.tick += 600
-    command("hello", expect=f"@R,H,1,1400,{run},DONE")
+    command("hello", expect=f"@R,H,2,1400,700,{run},DONE")
     capture()
     assert sum(f",{run},{len(events())}," in line and ",DONE," in line
                for line in board.wire if line.startswith("@R,E,")) >= 2
@@ -404,8 +434,8 @@ def verify_relief(path):
             board.age = 0
         elif fault == "INTERLOCK":
             # An interlock tripped between two 50 ms pressure updates.
-            board.call("cooling_safety_set_tank", 0)
-            board.call("cooling_safety_set_tank", 1)
+            board.call("cooling_safety_set_auto_control", 0)
+            board.call("cooling_safety_set_auto_control", 1)
             point(600, state="ABORT")
         elif fault == "OVERTEMP":
             board.ntc1_adc = 400
@@ -415,7 +445,7 @@ def verify_relief(path):
             point(1400, state="ABORT")
         elif fault == "LINK":
             board.tick += 3100
-            command("hello", expect=f"@R,H,1,1400,{run},HEAT")
+            command("hello", expect=f"@R,H,2,1400,700,{run},HEAT")
             point(600, state="ABORT", ping=False)
         else:
             command("stop", str(run), expect=f"@R,A,{run},STOP")
@@ -431,7 +461,20 @@ def verify_relief(path):
         command("start", str(run), expect=f"@R,A,{run},START")
         point(600, state="ABORT")
         ack()
-        board.clear_tank_faults()
+    for command_name, payload, state in (("cfg", cfg + ",1", "HEAT"),
+                                         ("mcfg", "900,600,1", "MANUAL")):
+        run += 1
+        command(command_name, str(run), payload, expect=f"@R,C,{run},{payload}")
+        command("start", str(run), expect=f"@R,A,{run},START")
+        # Span two PWM windows including the pressure band closest to the target.
+        for p in [600, 850, 898] * 7:
+            control, _ = point(p, state=state)
+            assert control["duty"] == 100 and board.output, (command_name, p, control)
+        point(900, state="ABORT" if state=="MANUAL" else "LIMIT")
+        if state == "HEAT":
+            command("stop", str(run), expect=f"@R,A,{run},STOP")
+            point(600, state="ABORT")
+        ack()
     print("PASS: relief firmware boot inhibit, real serial configuration and telemetry, "
           "two cycles, event replay, stop, heartbeat, sensors and hard cutoffs")
 
@@ -441,6 +484,7 @@ if __name__ == "__main__":
     parser.add_argument("elf", type=Path)
     parser.add_argument("--mode", choices=("test", "normal"), required=True)
     arguments = parser.parse_args()
+    verify_calibration(arguments.elf, arguments.mode == "test")
     if arguments.mode == "normal":
         verify_normal(arguments.elf)
     else:
