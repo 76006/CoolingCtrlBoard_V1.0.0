@@ -1,5 +1,7 @@
 # CoolingCtrlBoard RT-Thread Studio 使用说明
 
+本分支包含两个可独立导入的下位机工程。原控制板位于 `CoolingCtrlBoard_RTThread`。循环泄压测试固件位于 `Cooling_TestTool_RTthread`，配套桌面源码位于 `Cooling_TestTool_Qt`。从 Git 克隆后，按[上位机构建与使用说明](Cooling_TestTool_Qt/README.md)和[测试固件说明](Cooling_TestTool_RTthread/README_RTTHREAD_STUDIO.md)生成程序与固件。
+
 本工程面向自定义 CoolingCtrlBoard V1.0，不是 Nucleo 开发板。目标芯片为 STM32F302CCT6，RT-Thread 版本为 v5.2.2。
 
 可直接导入的完整工程位于：

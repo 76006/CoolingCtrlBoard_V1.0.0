@@ -1,0 +1,41 @@
+from building import *
+from SCons.Script import ARGUMENTS
+import os
+
+cwd = GetCurrentDir()
+common_root = os.path.abspath(os.path.join(cwd, '..', 'common'))
+
+# 应用层只保留本文件作为统一编译入口。业务模块仍按文件夹隔离，
+# 但不再要求每个模块各自携带一份 SConscript。
+module_dirs = [
+    '',
+    'hardware',
+    'adc',
+    'can',
+    'ota',
+    'heater',
+    'pressure',
+    'safety',
+    'tank',
+    'uid',
+]
+
+src = []
+CPPPATH = [cwd, common_root, os.path.join(common_root, 'can')]
+
+for module_dir in module_dirs:
+    if module_dir:
+        src += Glob(os.path.join(module_dir, '*.c'))
+        CPPPATH.append(os.path.join(cwd, module_dir))
+    else:
+        src += Glob('*.c')
+
+mode_options = {}
+if 'cooling_test_mode' in ARGUMENTS:
+    mode = ARGUMENTS['cooling_test_mode']
+    if mode not in ('0', '1'):
+        raise ValueError('cooling_test_mode must be 0 or 1')
+    mode_options['LOCAL_CPPDEFINES'] = ['COOLING_TEST_MODE=' + mode]
+group = DefineGroup('Applications', src, depend=[''], CPPPATH=CPPPATH, **mode_options)
+
+Return('group')

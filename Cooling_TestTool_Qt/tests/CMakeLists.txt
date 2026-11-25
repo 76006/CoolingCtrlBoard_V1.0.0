@@ -1,0 +1,11 @@
+add_executable(curveplot_test curveplot_test.cpp)
+target_link_libraries(curveplot_test PRIVATE relief_ui)
+add_test(NAME curveplot COMMAND curveplot_test)
+
+add_executable(station_test station_test.cpp)
+target_link_libraries(station_test PRIVATE relief_ui)
+add_test(NAME station COMMAND station_test)
+add_executable(recovery_test recovery_test.cpp)
+target_link_libraries(recovery_test PRIVATE relief_ui)
+add_test(NAME recovery COMMAND recovery_test)
+set_tests_properties(curveplot station recovery PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
