@@ -44,13 +44,20 @@
 #define COOLING_NTC_PULLUP_OHM                    10000U
 
 /*
- * 压力传感器：0.5--4.5 V 对应 0--1.600 MPa。
- * 板上调理电路理论增益为 72/157；ADC 参考电压为 3.0 V，
- * 因而零点约为 ADC 313，满量程约为 ADC 2817。
+ * ADC 引脚电压 = 传感器输出电压 × 0.4586。
+ * 标定表按 sensor_mv（mV）、参考表实测压力（0.001 MPa）递增排列。
+ * 2026-11-25 零点采样：raw=294，filtered=297，ADC 引脚电压 218 mV。
+ * 1.200 MPa 采样：raw=2793，filtered=2799，ADC 引脚电压 2051 mV。
+ * 相邻点间线性插值，高于最高实测点时沿最后一段外推。
  */
 #define COOLING_PRESSURE_CALIBRATED               1U
-#define COOLING_PRESSURE_ADC_ZERO                  313U
-#define COOLING_PRESSURE_ADC_FULL                 2817U
+#define COOLING_PRESSURE_GAIN_NUM                 4586U
+#define COOLING_PRESSURE_GAIN_DEN                10000U
+#define COOLING_PRESSURE_CAL_POINTS \
+    {  474,    0 },                 \
+    { 2860,  700 },                 \
+    { 3038,  790 },                 \
+    { 4471, 1200 }
 #define COOLING_PRESSURE_FULL_MPA1000             1600U
 
 /* ---------------------------------------------------------------------
@@ -83,39 +90,8 @@
 #define COOLING_PRESSURE_MEDIUM_DUTY_PERCENT       20U
 #define COOLING_PRESSURE_SLOW_DUTY_PERCENT         10U
 
-#define COOLING_PRESSURE_FAST_END_ADC               \
-    (COOLING_PRESSURE_ADC_ZERO +                                        \
-     ((COOLING_PRESSURE_FAST_END_MPA1000 *                              \
-       (COOLING_PRESSURE_ADC_FULL - COOLING_PRESSURE_ADC_ZERO) +         \
-       (COOLING_PRESSURE_FULL_MPA1000 / 2U)) /                             \
-      COOLING_PRESSURE_FULL_MPA1000))
-#define COOLING_PRESSURE_REHEAT_ADC                 \
-    (COOLING_PRESSURE_ADC_ZERO +                                        \
-     ((COOLING_PRESSURE_REHEAT_MPA1000 *                                \
-       (COOLING_PRESSURE_ADC_FULL - COOLING_PRESSURE_ADC_ZERO) +         \
-       (COOLING_PRESSURE_FULL_MPA1000 / 2U)) /                             \
-      COOLING_PRESSURE_FULL_MPA1000))
-#define COOLING_PRESSURE_SLOW_START_ADC             \
-    (COOLING_PRESSURE_ADC_ZERO +                                        \
-     ((COOLING_PRESSURE_SLOW_START_MPA1000 *                            \
-       (COOLING_PRESSURE_ADC_FULL - COOLING_PRESSURE_ADC_ZERO) +         \
-       (COOLING_PRESSURE_FULL_MPA1000 / 2U)) /                             \
-      COOLING_PRESSURE_FULL_MPA1000))
-#define COOLING_PRESSURE_CONTROL_HIGH_ADC            \
-    (COOLING_PRESSURE_ADC_ZERO +                                        \
-     ((COOLING_PRESSURE_CONTROL_HIGH_MPA1000 *                          \
-       (COOLING_PRESSURE_ADC_FULL - COOLING_PRESSURE_ADC_ZERO) +         \
-       (COOLING_PRESSURE_FULL_MPA1000 / 2U)) /                             \
-      COOLING_PRESSURE_FULL_MPA1000))
-
 /* 正常控制在 0.830 MPa 停热；压力达到 0.900 MPa 才锁存故障。 */
 #define COOLING_PRESSURE_CUTOFF_MPA1000           900U
-#define COOLING_PRESSURE_CUTOFF_ADC                \
-    (COOLING_PRESSURE_ADC_ZERO +                                        \
-     ((COOLING_PRESSURE_CUTOFF_MPA1000 *                                \
-       (COOLING_PRESSURE_ADC_FULL - COOLING_PRESSURE_ADC_ZERO) +         \
-       (COOLING_PRESSURE_FULL_MPA1000 / 2U)) /                             \
-      COOLING_PRESSURE_FULL_MPA1000))
 
 /* 升压总时长超过该值仍未达标，判定冷媒不足并锁存到拔罐。 */
 #define COOLING_PRESSURE_MAX_BOOST_TIME_MS      300000U

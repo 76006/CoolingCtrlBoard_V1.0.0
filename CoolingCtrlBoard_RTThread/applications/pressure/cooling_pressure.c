@@ -83,7 +83,7 @@ static rt_uint8_t pressure_update(rt_uint16_t raw_adc,
     }
 
     /* 0.830 MPa 提前停热，为惯性升压到 0.850 MPa 留出余量。 */
-    if (pressure >= COOLING_PRESSURE_CONTROL_HIGH_ADC)
+    if (pressure >= cooling_pressure_adc_from_mpa1000(COOLING_PRESSURE_CONTROL_HIGH_MPA1000))
     {
         pressure_state = COOLING_PRESSURE_STATE_HOLD;
         pressure_sufficient = RT_TRUE;
@@ -94,7 +94,7 @@ static rt_uint8_t pressure_update(rt_uint16_t raw_adc,
 
     /* 首次强热时压力先到 0.800 MPa，也立即转入压力保持阶段。 */
     if (!pressure_sufficient &&
-        (pressure >= COOLING_PRESSURE_REHEAT_ADC))
+        (pressure >= cooling_pressure_adc_from_mpa1000(COOLING_PRESSURE_REHEAT_MPA1000)))
     {
         pressure_sufficient = RT_TRUE;
         pressure_warmup_complete = RT_TRUE;
@@ -151,7 +151,7 @@ static rt_uint8_t pressure_update(rt_uint16_t raw_adc,
         /* 从上限回落时，0.800--0.830 MPa 区间保持关闭。 */
         if (!pressure_maintain_on)
         {
-            if (pressure > COOLING_PRESSURE_REHEAT_ADC)
+            if (pressure > cooling_pressure_adc_from_mpa1000(COOLING_PRESSURE_REHEAT_MPA1000))
             {
                 return 0U;
             }
@@ -159,11 +159,11 @@ static rt_uint8_t pressure_update(rt_uint16_t raw_adc,
         }
     }
 
-    if (pressure < COOLING_PRESSURE_FAST_END_ADC)
+    if (pressure < cooling_pressure_adc_from_mpa1000(COOLING_PRESSURE_FAST_END_MPA1000))
     {
         return COOLING_PRESSURE_FAST_DUTY_PERCENT;
     }
-    if (pressure < COOLING_PRESSURE_SLOW_START_ADC)
+    if (pressure < cooling_pressure_adc_from_mpa1000(COOLING_PRESSURE_SLOW_START_MPA1000))
     {
         return COOLING_PRESSURE_MEDIUM_DUTY_PERCENT;
     }
@@ -283,7 +283,7 @@ static void pressure_control_entry(void *parameter)
         /* 使用未滤波值做硬关断，避免滤波延迟造成超压。 */
         if (adc_valid &&
             (adc.value[COOLING_ADC_HYSN2].raw >=
-             COOLING_PRESSURE_CUTOFF_ADC))
+             cooling_pressure_adc_from_mpa1000(COOLING_PRESSURE_CUTOFF_MPA1000)))
         {
             pressure_over_latched = RT_TRUE;
         }
@@ -452,7 +452,8 @@ static void pressure_print_snapshot(const cooling_pressure_snapshot_t *snapshot)
                (unsigned int)snapshot->millivolts);
     if (pressure_valid)
     {
-        rt_kprintf(" pressure=%u.%03uMPa\n",
+        rt_kprintf(" sensor_mv=%u pressure=%u.%03uMPa\n",
+                   (unsigned int)cooling_pressure_sensor_mv(snapshot->filtered),
                    (unsigned int)(pressure_mpa1000 / 1000U),
                    (unsigned int)(pressure_mpa1000 % 1000U));
     }

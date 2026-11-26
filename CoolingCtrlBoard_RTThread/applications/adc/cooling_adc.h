@@ -46,7 +46,13 @@ rt_err_t cooling_adc_start(void);
  */
 void cooling_adc_get_snapshot(cooling_adc_snapshot_t *snapshot);
 
-/* 滤波 ADC 值换算为 0.001 MPa；未标定时返回 -1。 */
+/* 从 HYSN2 码值还原调理前的传感器输出电压，单位 mV。 */
+uint16_t cooling_pressure_sensor_mv(uint16_t adc);
+
+/* 将量程内的控制压力阈值（0.001 MPa）反算为最接近的 ADC 码值。 */
+uint16_t cooling_pressure_adc_from_mpa1000(uint16_t pressure_mpa1000);
+
+/* 按传感器输出电压换算为 0.001 MPa；未标定时返回 -1。 */
 int cooling_sensor_pressure_mpa1000(uint16_t filtered_adc,
                                     uint16_t *pressure_mpa1000);
 

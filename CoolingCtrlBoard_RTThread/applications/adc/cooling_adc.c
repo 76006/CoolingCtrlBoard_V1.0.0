@@ -249,6 +249,8 @@ static void adc_print_snapshot(const cooling_adc_snapshot_t *snapshot)
         {
             rt_uint16_t pressure_mpa1000;
 
+            rt_kprintf(" sensor_mv=%u", (unsigned int)cooling_pressure_sensor_mv(
+                           snapshot->value[input].filtered));
             if (cooling_sensor_pressure_mpa1000(
                     snapshot->value[input].filtered,
                     &pressure_mpa1000) == 0)
@@ -445,31 +447,74 @@ static int ntc_temperature_from_adc(rt_uint16_t filtered_adc,
     return -1;
 }
 
+uint16_t cooling_pressure_sensor_mv(uint16_t adc)
+{
+    /* Vadc / 0.4586，保留 ADC 换算精度直到传感器毫伏值取整。 */
+    uint64_t numerator = (uint64_t)adc * COOLING_ADC_REFERENCE_MV *
+                         COOLING_PRESSURE_GAIN_DEN;
+    uint32_t denominator = COOLING_ADC_FULL_SCALE * COOLING_PRESSURE_GAIN_NUM;
+
+    return (uint16_t)((numerator + denominator / 2U) / denominator);
+}
+
+typedef struct
+{
+    uint16_t sensor_mv;
+    uint16_t mpa1000;
+} pressure_cal_point_t;
+
+static const pressure_cal_point_t pressure_cal[] = { COOLING_PRESSURE_CAL_POINTS };
+#define PRESSURE_CAL_COUNT (sizeof(pressure_cal) / sizeof(pressure_cal[0]))
+
+uint16_t cooling_pressure_adc_from_mpa1000(uint16_t pressure_mpa1000)
+{
+    size_t hi = 1;
+    while (hi + 1 < PRESSURE_CAL_COUNT && pressure_mpa1000 > pressure_cal[hi].mpa1000)
+    {
+        ++hi;
+    }
+    const pressure_cal_point_t *low = &pressure_cal[hi - 1];
+    const pressure_cal_point_t *high = &pressure_cal[hi];
+    uint32_t span_pressure = high->mpa1000 - low->mpa1000;
+    uint32_t span_mv = high->sensor_mv - low->sensor_mv;
+    /* 保留插值的小数，仅在得到最终 ADC 码值时取整。 */
+    uint32_t scaled_mv = low->sensor_mv * span_pressure +
+                         (pressure_mpa1000 - low->mpa1000) * span_mv;
+    uint64_t numerator = (uint64_t)scaled_mv * COOLING_PRESSURE_GAIN_NUM * COOLING_ADC_FULL_SCALE;
+    uint64_t denominator = (uint64_t)span_pressure * COOLING_PRESSURE_GAIN_DEN * COOLING_ADC_REFERENCE_MV;
+    return (uint16_t)((numerator + denominator / 2U) / denominator);
+}
+
 int cooling_sensor_pressure_mpa1000(uint16_t filtered_adc,
                                     uint16_t *pressure_mpa1000)
 {
-    *pressure_mpa1000 = 0U;
 #if COOLING_PRESSURE_CALIBRATED != 0
-    if (filtered_adc <= COOLING_PRESSURE_ADC_ZERO)
+    uint16_t sensor_mv = cooling_pressure_sensor_mv(filtered_adc);
+    size_t hi = 1;
+    if (sensor_mv <= pressure_cal[0].sensor_mv)
     {
         *pressure_mpa1000 = 0U;
+        return 0;
     }
-    else if (filtered_adc >= COOLING_PRESSURE_ADC_FULL)
+    while (hi + 1 < PRESSURE_CAL_COUNT && sensor_mv > pressure_cal[hi].sensor_mv)
     {
-        *pressure_mpa1000 = COOLING_PRESSURE_FULL_MPA1000;
+        ++hi;
     }
-    else
+    const pressure_cal_point_t *low = &pressure_cal[hi - 1];
+    const pressure_cal_point_t *high = &pressure_cal[hi];
+    uint32_t span_mv = high->sensor_mv - low->sensor_mv;
+    uint32_t span_pressure = high->mpa1000 - low->mpa1000;
+    uint32_t pressure = low->mpa1000 +
+        ((sensor_mv - low->sensor_mv) * span_pressure + span_mv / 2U) / span_mv;
+    if (pressure > COOLING_PRESSURE_FULL_MPA1000)
     {
-        *pressure_mpa1000 = (uint16_t)(
-            ((uint32_t)(filtered_adc - COOLING_PRESSURE_ADC_ZERO) *
-             COOLING_PRESSURE_FULL_MPA1000 +
-             ((COOLING_PRESSURE_ADC_FULL -
-               COOLING_PRESSURE_ADC_ZERO) / 2U)) /
-            (COOLING_PRESSURE_ADC_FULL - COOLING_PRESSURE_ADC_ZERO));
+        pressure = COOLING_PRESSURE_FULL_MPA1000;
     }
+    *pressure_mpa1000 = (uint16_t)pressure;
     return 0;
 #else
     (void)filtered_adc;
+    *pressure_mpa1000 = 0U;
     return -1;
 #endif
 }
